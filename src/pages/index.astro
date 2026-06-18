@@ -1,0 +1,341 @@
+---
+import Base from "../layouts/Base.astro";
+
+const GITHUB_ORG = "https://github.com/bulutklinik";
+
+const sdks = [
+  {
+    lang: "JavaScript / TypeScript",
+    registry: "npm",
+    pkg: "@bulutklinik/sdk",
+    install: "npm install @bulutklinik/sdk",
+    repo: `${GITHUB_ORG}/js-sdk`,
+    status: "live",
+  },
+  {
+    lang: "Python",
+    registry: "PyPI",
+    pkg: "bulutklinik-sdk",
+    install: "pip install bulutklinik-sdk",
+    repo: `${GITHUB_ORG}/python-sdk`,
+    status: "live",
+  },
+  {
+    lang: "PHP",
+    registry: "Packagist",
+    pkg: "bulutklinik/sdk",
+    install: "composer require bulutklinik/sdk",
+    repo: `${GITHUB_ORG}/php-sdk`,
+    status: "live",
+  },
+  {
+    lang: "Go",
+    registry: "Go modules",
+    pkg: "github.com/bulutklinik/go-sdk",
+    install: "go get github.com/bulutklinik/go-sdk",
+    repo: `${GITHUB_ORG}/go-sdk`,
+    status: "live",
+  },
+  {
+    lang: "C# / .NET",
+    registry: "NuGet",
+    pkg: "Bulutklinik.Sdk",
+    install: "dotnet add package Bulutklinik.Sdk",
+    repo: `${GITHUB_ORG}/csharp-sdk`,
+    status: "live",
+  },
+  {
+    lang: "C++",
+    registry: "vcpkg · Conan · CMake",
+    pkg: "bulutklinik-sdk",
+    install: "# CMake · vcpkg · Conan — see repo",
+    repo: `${GITHUB_ORG}/cpp-sdk`,
+    status: "live",
+  },
+  {
+    lang: "Java",
+    registry: "Maven Central",
+    pkg: "com.bulutklinik:sdk",
+    install: 'implementation("com.bulutklinik:sdk:0.1.0")',
+    repo: `${GITHUB_ORG}/java-sdk`,
+    status: "soon",
+  },
+];
+
+const services = [
+  { name: "Auth", desc: "OAuth2 / Passport login, two-factor, token refresh & registration." },
+  { name: "Doctors", desc: "Branches, locations, quick & filtered doctor search, and details." },
+  { name: "Slots", desc: "Real-time doctor availability from materialized appointment slots." },
+  { name: "Appointments", desc: "Online reservations, physical appointments and cancellation." },
+  { name: "Payments", desc: "Discount codes, saved cards and 3-D Secure appointment payments." },
+  { name: "Measures", desc: "Patient health measurements — CRUD, history lists and graphs." },
+];
+
+const samples: Record<string, string> = {
+  cURL: `curl -X POST https://api.bulutklinik.com/api/v3/general/connectApi \\
+  -H "Content-Type: application/json" -H "lang: tr" \\
+  -d '{
+    "apiUserName": "you@example.com",
+    "apiUserPassword": "•••••••",
+    "apiClientId": "…",
+    "apiSecretKey": "…",
+    "loginMode": "email"
+  }'`,
+  JavaScript: `import { BulutklinikClient } from "@bulutklinik/sdk";
+
+const client = new BulutklinikClient({ clientId, clientSecret });
+await client.auth.connect({ apiUserName, apiUserPassword, loginMode: "email" });
+
+const { foundDoctors } = await client.doctors.search({
+  searchParams: { withFreeText: "kardiyoloji" },
+  orderParams: ["slot"],
+});`,
+  Python: `from bulutklinik import BulutklinikClient
+
+client = BulutklinikClient(client_id=client_id, client_secret=client_secret)
+client.auth.connect("you@example.com", "•••••••", "email")
+
+result = client.doctors.search(search_params={"withFreeText": "kardiyoloji"})`,
+  PHP: `use Bulutklinik\\Sdk\\BulutklinikClient;
+use Bulutklinik\\Sdk\\ClientConfig;
+
+$client = new BulutklinikClient(new ClientConfig(clientId: $id, clientSecret: $secret));
+$client->auth->connect('you@example.com', '•••••••', 'email');
+
+$result = $client->doctors->search(searchParams: ['withFreeText' => 'kardiyoloji']);`,
+  Go: `client := bk.NewClient(bk.WithCredentials(id, secret))
+client.Auth.Connect(ctx, bk.ConnectInput{
+    APIUserName: "you@example.com", APIUserPassword: "•••••••", LoginMode: "email",
+})
+
+data, _ := client.Doctors.Search(ctx, bk.SearchInput{
+    SearchParams: map[string]any{"withFreeText": "kardiyoloji"},
+})`,
+};
+const sampleLangs = Object.keys(samples);
+
+const steps = [
+  { n: "1", title: "Get API credentials", desc: "Request an OAuth2 client id & secret for your clinic from Bulutklinik." },
+  { n: "2", title: "Install an SDK", desc: "One line in your language of choice — seven of them, all idiomatic." },
+  { n: "3", title: "Make your first call", desc: "Authenticate, search a doctor, book a slot, take a payment." },
+];
+---
+
+<Base>
+  <!-- Header -->
+  <header class="sticky top-0 z-40 border-b border-slate-200/70 bg-white/80 backdrop-blur-md">
+    <div class="mx-auto flex h-16 max-w-6xl items-center justify-between px-5">
+      <a href="/" class="flex items-center gap-2.5">
+        <img src="/favicon.svg" alt="" width="28" height="28" />
+        <span class="text-[15px] font-semibold tracking-tight text-slate-900">
+          bulutklinik <span class="font-normal text-slate-400">/ developer</span>
+        </span>
+      </a>
+      <nav class="hidden items-center gap-7 text-sm font-medium text-slate-600 md:flex">
+        <a href="#services" class="transition hover:text-slate-900">Services</a>
+        <a href="#sdks" class="transition hover:text-slate-900">SDKs</a>
+        <a href="#quickstart" class="transition hover:text-slate-900">Quick start</a>
+        <a href={GITHUB_ORG} class="transition hover:text-slate-900">GitHub</a>
+      </nav>
+      <div class="flex items-center gap-3">
+        <a href="#sdks" class="hidden rounded-lg bg-brand-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700 sm:inline-block">
+          Get started
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <section class="relative overflow-hidden">
+      <div class="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-b from-brand-50/70 to-white"></div>
+      <div class="mx-auto max-w-6xl px-5 pt-20 pb-16 text-center sm:pt-28">
+        <span class="inline-flex items-center gap-2 rounded-full border border-brand-100 bg-white px-3 py-1 text-xs font-medium text-brand-700 shadow-sm">
+          <span class="h-1.5 w-1.5 rounded-full bg-brand-500"></span>
+          Official SDKs · v0.1.0
+        </span>
+        <h1 class="mx-auto mt-6 max-w-3xl text-4xl font-extrabold leading-[1.1] tracking-tight text-slate-900 sm:text-6xl">
+          Build healthcare integrations <span class="text-brand-600">faster</span>
+        </h1>
+        <p class="mx-auto mt-5 max-w-2xl text-lg text-slate-600">
+          The Bulutklinik API powers appointments, payments and patient health data for cloud HBYS.
+          Ship in your language with official, idiomatic SDKs.
+        </p>
+        <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+          <a href="#sdks" class="rounded-lg bg-brand-600 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-brand-700">
+            Start building
+          </a>
+          <a href="#quickstart" class="rounded-lg border border-slate-300 bg-white px-5 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-400 hover:text-slate-900">
+            Quick start
+          </a>
+        </div>
+
+        <dl class="mx-auto mt-14 grid max-w-3xl grid-cols-1 gap-4 sm:grid-cols-3">
+          {[
+            { v: "7", k: "Official SDKs" },
+            { v: "6 · 27", k: "Services · endpoints" },
+            { v: "OAuth2", k: "Passport-secured" },
+          ].map((s) => (
+            <div class="rounded-2xl border border-slate-200 bg-white p-6 text-left shadow-sm">
+              <dd class="text-3xl font-bold tracking-tight text-slate-900">{s.v}</dd>
+              <dt class="mt-1 text-sm text-slate-500">{s.k}</dt>
+            </div>
+          ))}
+        </dl>
+      </div>
+    </section>
+
+    <!-- Code tabs -->
+    <section class="mx-auto max-w-5xl px-5 py-8">
+      <div class="overflow-hidden rounded-2xl border border-slate-800 bg-slate-900 shadow-xl">
+        <div class="flex flex-wrap items-center gap-1 border-b border-slate-800 bg-slate-900/60 px-3 py-2" role="tablist">
+          {sampleLangs.map((lang, i) => (
+            <button
+              data-tab={lang}
+              class:list={[
+                "rounded-md px-3 py-1.5 text-xs font-medium transition",
+                i === 0 ? "bg-slate-700 text-white" : "text-slate-400 hover:text-slate-200",
+              ]}
+            >
+              {lang}
+            </button>
+          ))}
+        </div>
+        {sampleLangs.map((lang, i) => (
+          <pre
+            data-panel={lang}
+            class:list={["overflow-x-auto p-5 text-[13px] leading-relaxed text-slate-100", i !== 0 && "hidden"]}
+          ><code class="font-mono">{samples[lang]}</code></pre>
+        ))}
+      </div>
+    </section>
+
+    <!-- Services -->
+    <section id="services" class="mx-auto max-w-6xl px-5 py-20">
+      <div class="max-w-2xl">
+        <h2 class="text-3xl font-bold tracking-tight text-slate-900">One API, every workflow</h2>
+        <p class="mt-3 text-slate-600">Six service groups cover the full patient journey — from finding a doctor to closing a payment.</p>
+      </div>
+      <div class="mt-10 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+        {services.map((s) => (
+          <div class="group rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:border-brand-200 hover:shadow-md">
+            <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50 text-brand-600">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+            </div>
+            <h3 class="mt-4 text-lg font-semibold text-slate-900">{s.name}</h3>
+            <p class="mt-1.5 text-sm text-slate-600">{s.desc}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+
+    <!-- SDKs -->
+    <section id="sdks" class="border-y border-slate-200 bg-slate-50">
+      <div class="mx-auto max-w-6xl px-5 py-20">
+        <div class="max-w-2xl">
+          <h2 class="text-3xl font-bold tracking-tight text-slate-900">SDKs for 7 languages</h2>
+          <p class="mt-3 text-slate-600">Hand-written, idiomatic clients with a shared design: typed errors, pluggable token store and silent token refresh.</p>
+        </div>
+        <div class="mt-10 grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
+          {sdks.map((sdk) => (
+            <div class="flex flex-col rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition hover:shadow-md">
+              <div class="flex items-start justify-between gap-3">
+                <div>
+                  <h3 class="text-base font-semibold text-slate-900">{sdk.lang}</h3>
+                  <p class="mt-0.5 text-xs text-slate-500">{sdk.registry} · <span class="font-mono">{sdk.pkg}</span></p>
+                </div>
+                {sdk.status === "soon" ? (
+                  <span class="shrink-0 rounded-full bg-amber-100 px-2.5 py-1 text-[11px] font-semibold text-amber-700">Coming soon</span>
+                ) : (
+                  <span class="shrink-0 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">Available</span>
+                )}
+              </div>
+              <div class="mt-4 rounded-lg bg-slate-900 px-3.5 py-2.5">
+                <code class="block overflow-x-auto font-mono text-[12.5px] text-slate-100">{sdk.install}</code>
+              </div>
+              <a href={sdk.repo} class="mt-4 inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 transition hover:text-brand-700">
+                View on GitHub
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M7 7h10v10"/></svg>
+              </a>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <!-- Quick start -->
+    <section id="quickstart" class="mx-auto max-w-6xl px-5 py-20">
+      <div class="max-w-2xl">
+        <h2 class="text-3xl font-bold tracking-tight text-slate-900">Up and running in minutes</h2>
+        <p class="mt-3 text-slate-600">Three steps from zero to your first API call.</p>
+      </div>
+      <ol class="mt-10 grid grid-cols-1 gap-6 md:grid-cols-3">
+        {steps.map((step) => (
+          <li class="relative rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+            <span class="flex h-9 w-9 items-center justify-center rounded-full bg-brand-600 text-sm font-bold text-white">{step.n}</span>
+            <h3 class="mt-4 text-lg font-semibold text-slate-900">{step.title}</h3>
+            <p class="mt-1.5 text-sm text-slate-600">{step.desc}</p>
+          </li>
+        ))}
+      </ol>
+    </section>
+  </main>
+
+  <!-- Footer -->
+  <footer class="bg-slate-900 text-slate-300">
+    <div class="mx-auto grid max-w-6xl grid-cols-2 gap-8 px-5 py-14 sm:grid-cols-4">
+      <div class="col-span-2 sm:col-span-1">
+        <div class="flex items-center gap-2.5">
+          <img src="/favicon.svg" alt="" width="26" height="26" />
+          <span class="font-semibold text-white">bulutklinik</span>
+        </div>
+        <p class="mt-3 max-w-xs text-sm text-slate-400">Telemedicine & cloud HBYS for clinics. Official developer SDKs.</p>
+      </div>
+      <div>
+        <h4 class="text-sm font-semibold text-white">SDKs</h4>
+        <ul class="mt-3 space-y-2 text-sm">
+          {sdks.map((sdk) => (
+            <li><a href={sdk.repo} class="text-slate-400 transition hover:text-white">{sdk.lang}</a></li>
+          ))}
+        </ul>
+      </div>
+      <div>
+        <h4 class="text-sm font-semibold text-white">Resources</h4>
+        <ul class="mt-3 space-y-2 text-sm">
+          <li><a href={GITHUB_ORG} class="text-slate-400 transition hover:text-white">GitHub organization</a></li>
+          <li><a href="#sdks" class="text-slate-400 transition hover:text-white">SDKs</a></li>
+          <li><a href="#services" class="text-slate-400 transition hover:text-white">Services</a></li>
+          <li><a href="#quickstart" class="text-slate-400 transition hover:text-white">Quick start</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4 class="text-sm font-semibold text-white">Company</h4>
+        <ul class="mt-3 space-y-2 text-sm">
+          <li><a href="https://www.bulutklinik.com" class="text-slate-400 transition hover:text-white">bulutklinik.com</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="border-t border-slate-800">
+      <div class="mx-auto max-w-6xl px-5 py-6 text-sm text-slate-500">
+        © 2026 Bulutklinik · API v3 · SDKs v0.1.0
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    const tabs = document.querySelectorAll<HTMLButtonElement>("[data-tab]");
+    const panels = document.querySelectorAll<HTMLElement>("[data-panel]");
+    tabs.forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const target = tab.dataset.tab;
+        tabs.forEach((t) => {
+          const active = t === tab;
+          t.classList.toggle("bg-slate-700", active);
+          t.classList.toggle("text-white", active);
+          t.classList.toggle("text-slate-400", !active);
+        });
+        panels.forEach((p) => p.classList.toggle("hidden", p.dataset.panel !== target));
+      });
+    });
+  </script>
+</Base>
