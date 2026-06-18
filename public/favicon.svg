@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
-  <rect width="32" height="32" rx="7" fill="#2451e6"/>
-  <path d="M10.5 21.5a4.5 4.5 0 0 1-.4-8.98 5.5 5.5 0 0 1 10.62-1.04A4 4 0 0 1 22 21.5z" fill="#fff" opacity="0.95"/>
-  <path d="M15 12.2h2v2.6h2.6v2h-2.6v2.6h-2v-2.6h-2.6v-2H15z" fill="#2451e6"/>
-</svg>
+<svg id="katman_1" data-name="katman 1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 68 68"><defs><style>.cls-1{fill:#fff;}.cls-2{fill:#1a9d99;}.cls-3{fill:#45eaaa;}</style></defs><title>bulut-klinik-simple-logo</title><g id="Group_341" data-name="Group 341"><rect id="Rectangle_27" data-name="Rectangle 27" class="cls-1" width="68" height="68" rx="19"/><g id="Group_1820" data-name="Group 1820"><path id="Path_1519" data-name="Path 1519" class="cls-2" d="M-156.56,30.12h0a8.09,8.09,0,0,0,0,11.42l0,0a8.08,8.08,0,0,0,11.43,0l0,0,5.72-5.71-5.74-5.74a8.08,8.08,0,0,0-11.43,0Z" transform="translate(171 -7)"/><path id="Path_1527" data-name="Path 1527" class="cls-3" d="M-119,31.09a8.08,8.08,0,0,0-11.43,0l-8.07,8.07h0l-4.55,4.56a8.11,8.11,0,0,1-10,1.13l4.45,4.45h0l5.72,5.71a8.08,8.08,0,0,0,11.43,0l12.5-12.5h0A8.07,8.07,0,0,0-119,31.09Z" transform="translate(171 -7)"/></g></g></svg>

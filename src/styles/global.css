@@ -1,16 +1,21 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-50: #eef4ff;
-  --color-brand-100: #d9e6ff;
-  --color-brand-200: #bcd3ff;
-  --color-brand-300: #8fb6ff;
-  --color-brand-400: #5b8eff;
-  --color-brand-500: #3b6bf6;
-  --color-brand-600: #2451e6;
-  --color-brand-700: #1d3fc4;
-  --color-brand-800: #1d379e;
-  --color-brand-900: #1d327d;
+  /* Bulutklinik brand: teal #1a9d99 (primary) + green #45eaaa (accent) + navy #040345 */
+  --color-brand-50: #effdf8;
+  --color-brand-100: #d6f9ec;
+  --color-brand-200: #aff1da;
+  --color-brand-300: #6fe6c1;
+  --color-brand-400: #45eaaa;
+  --color-brand-500: #1fc4a0;
+  --color-brand-600: #1a9d99;
+  --color-brand-700: #167e7d;
+  --color-brand-800: #146462;
+  --color-brand-900: #114f4e;
+
+  /* Brand navy — dark sections (footer) */
+  --color-ink-900: #0a0950;
+  --color-ink-950: #040345;
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "JetBrains Mono", "SFMono-Regular", "Cascadia Code", Consolas, monospace;
