@@ -117,7 +117,7 @@ Both `BulutklinikClient(...)` and `AsyncBulutklinikClient(...)` take the same
 | `transport`     | `httpx.BaseTransport \| None` (async: `httpx.AsyncBaseTransport \| None`) | `None` | Injectable httpx transport (useful for testing / proxies). |
 
 `environment` accepts either the plain string or the exported `Environment` enum
-(`Environment.PRODUCTION`, `Environment.TEST`, `Environment.LOCAL`).
+(`Environment.PRODUCTION`, `Environment.TEST`).
 
 ### Environments
 
@@ -125,7 +125,6 @@ Both `BulutklinikClient(...)` and `AsyncBulutklinikClient(...)` take the same
 |--------------|----------|
 | `production` | `https://api.bulutklinik.com/api/v3` |
 | `test`       | `https://apitest.bulutklinik.com/api/v3` |
-| `local`      | `https://api-bulutklinik.test/api/v3` |
 
 The active store is reachable as `client.token_store`. The sync client closes via
 `client.close()` (or `with`); the async client via `await client.aclose()` (or
