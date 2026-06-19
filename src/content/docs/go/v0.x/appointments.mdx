@@ -1,0 +1,59 @@
+---
+title: Appointments
+description: Reserve online interviews, create physical appointments, and cancel by event id.
+order: 4
+---
+
+# Appointments
+
+`client.Appointments` books and cancels appointments. All methods require a bearer
+token and return the unwrapped `data` as a `json.RawMessage`. The server resolves the
+slot from `doctorID` + `appointmentDate` — there is no `slotId` in the request.
+
+| Method | Endpoint |
+|--------|----------|
+| `ReserveInterview(ctx, doctorID, appointmentDate, appointmentType)` | `POST /patients/addInterviewDateReservation` |
+| `AddPhysical(ctx, doctorID, appointmentDate)` | `POST /patients/addNewAppointment` |
+| `Cancel(ctx, eventID)` | `DELETE /patients/deleteUserAppointment/{eventID}` |
+
+## `ReserveInterview(ctx, doctorID, appointmentDate, appointmentType)`
+
+Reserve an online (interview) slot. The `data` payload is `null` on success.
+
+```go
+_, err := client.Appointments.ReserveInterview(ctx, 8282, "2026-06-20 14:30", "")
+```
+
+| Argument          | Type     | Required | Notes |
+|-------------------|----------|:--------:|-------|
+| `doctorID`        | `any`    | ✓        | An `int` or `string`. |
+| `appointmentDate` | `string` | ✓        | `Y-m-d H:i`, today..+21. |
+| `appointmentType` | `string` | —        | `"interview"` or `"appointment"`. Defaults to `"interview"` when empty. |
+
+A successful reservation returns `data: null` (the API responds `resultType 0`).
+Conflicts and validation failures return a typed [error](/docs/go/v0.x/errors/).
+
+## `AddPhysical(ctx, doctorID, appointmentDate)`
+
+Create an in-person (physical) appointment. No `appointmentType`.
+
+```go
+_, err := client.Appointments.AddPhysical(ctx, 8282, "2026-06-20 14:30")
+```
+
+| Argument          | Type     | Required | Notes |
+|-------------------|----------|:--------:|-------|
+| `doctorID`        | `any`    | ✓        | An `int` or `string`. |
+| `appointmentDate` | `string` | ✓        | `Y-m-d H:i`. |
+
+## `Cancel(ctx, eventID)`
+
+Cancel an appointment by its event id (`cln_events.id`). `eventID` is `any` so an
+`int` or `string` works.
+
+```go
+_, err := client.Appointments.Cancel(ctx, eventID)
+```
+
+> Cancellation can be rejected (server-side) for insurance appointments, once the
+> cancel window has passed, or if the event is not found — these surface as a typed error.

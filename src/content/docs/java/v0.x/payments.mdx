@@ -1,0 +1,130 @@
+---
+title: Payments
+description: Validate discount codes, manage saved cards, and start a 3-D Secure appointment payment.
+order: 5
+---
+
+# Payments
+
+`client.payments` handles discount checks, saved cards and the appointment payment
+entrypoint. All methods require a bearer token and return a Jackson `JsonNode`. The
+amount is always computed **server-side** — you never send a price.
+
+| Method                                                          | Endpoint |
+|-----------------------------------------------------------------|----------|
+| `checkDiscountCode(checkType, discountCode, doctorId, orderId, specialServiceId, programSlug)` | `POST /patients/checkDiscountCode` |
+| `getCards()`                                                    | `GET /payments/getCards` |
+| `saveCard(CardInfo)`                                            | `POST /payments/saveCard` |
+| `pay(PaymentInput)`                                             | `POST /payments/interviewPayment` |
+| `deleteCard(cardId)`                                            | `DELETE /payments/deleteCard/{cardId}` |
+
+## `checkDiscountCode(...)`
+
+Validate a discount code before paying. (Note: this endpoint lives under the
+`patients` prefix, not `payments`.) Pass `null` for any of `doctorId`, `orderId`,
+`specialServiceId`, `programSlug` to omit it.
+
+```java
+JsonNode discount = client.payments.checkDiscountCode(
+        "appointment",  // checkType
+        "WELCOME10",     // discountCode
+        8282,            // doctorId
+        null,            // orderId
+        null,            // specialServiceId
+        null);           // programSlug
+```
+
+`checkDiscountCode` parameters:
+
+| Parameter          | Type     | Required | Notes |
+|--------------------|----------|:--------:|-------|
+| `checkType`        | `String` | ✓        | `"question"` \| `"appointment"` \| `"lab"` \| `"special"` \| `"physicallyAppointment"` \| `"tmcLab"` \| `"program"`. |
+| `discountCode`     | `String` | ✓        | The code to validate. |
+| `doctorId`         | `Object` | ✓*       | Required except `lab` / `tmcLab` / `program`. `null` to omit. |
+| `orderId`          | `Object` | —        | Per check type; `null` to omit. |
+| `specialServiceId` | `Object` | —        | For `special`; `null` to omit. |
+| `programSlug`      | `String` | —        | For `program`; `null` to omit. |
+
+A valid code returns `{ discount_code, discount_title, discount_id, prices }`.
+
+## Saved cards
+
+```java
+JsonNode cards = client.payments.getCards();
+// cards.get("cards"): [{ id, card_holder_name, card_number (masked), card_type, created_at }]
+
+client.payments.saveCard(new CardInfo(
+        "Ada Lovelace",        // cardHolder
+        "4111111111111111",    // cardNumber
+        "12",                  // cardExpMonth ("m")
+        "2030",                // cardExpYear ("Y")
+        "123"));               // cardCvv
+
+client.payments.deleteCard(cardId); // cardId from getCards()
+```
+
+`CardInfo` components (in order) are all required:
+
+| Component      | Type     | Notes |
+|----------------|----------|-------|
+| `cardHolder`   | `String` | Name on the card. |
+| `cardNumber`   | `String` | Full PAN. |
+| `cardExpMonth` | `String` | Two-digit month (`m`). |
+| `cardExpYear`  | `String` | Four-digit year (`Y`). |
+| `cardCvv`      | `String` | Card verification code. |
+
+`deleteCard(cardId)` takes the id as `Object`.
+
+## `pay(PaymentInput)`
+
+Start an appointment payment. Provide **either** a new `cardInfo` (a `CardInfo`)
+**or** a saved `cardId`.
+
+```java
+PaymentInput input = new PaymentInput(
+        8282,                  // doctorId
+        "2026-06-20 14:30",    // appointmentDate ("yyyy-MM-dd HH:mm")
+        true,                  // is3D
+        true,                  // termsAccept
+        "interview",           // appointmentType ("interview" | "appointment")
+        null,                  // cardInfo (…or pass a CardInfo and leave cardId null)
+        savedCardId,           // cardId (a saved card id)
+        0,                     // saveCard (1 tokenizes a new card)
+        "WELCOME10",           // discountCode (optional)
+        null);                 // caseDetail (optional encrypted blob)
+
+JsonNode result = client.payments.pay(input);
+
+if (result.hasNonNull("payment3DUrl")) {
+    String url = result.get("payment3DUrl").asText();
+    // Open this URL in a browser to complete 3-D Secure.
+}
+```
+
+`PaymentInput` components (in order):
+
+| Component         | Type       | Required | Notes |
+|-------------------|------------|:--------:|-------|
+| `doctorId`        | `Object`   | ✓        | `int`, `Integer` or `String`. |
+| `appointmentDate` | `String`   | ✓        | `yyyy-MM-dd HH:mm`. |
+| `is3D`            | `boolean`  | ✓        | `true` returns a `payment3DUrl`. |
+| `termsAccept`     | `boolean`  | ✓        | Must be accepted. |
+| `appointmentType` | `String`   | —        | `"interview"` (default when `null`) \| `"appointment"`. |
+| `cardInfo`        | `CardInfo` | —*       | A new card (all-or-none)… |
+| `cardId`          | `Object`   | —*       | …or a saved card id. |
+| `saveCard`        | `int`      | —        | `1` tokenizes the card. |
+| `discountCode`    | `String`   | —        | Optional; sent as `""` when `null`. |
+| `caseDetail`      | `String`   | —        | Opaque encrypted blob, passed through verbatim. |
+
+## 3-D Secure
+
+On a 3DS flow (`is3D = true`) the result carries `payment3DUrl` — a **browser URL**
+to open. The SDK returns it verbatim and does **not** follow, open or parse it.
+3DS completion (the "provizyon kapatma" / capture) happens browser ↔ bank ↔ server
+via a callback, which is outside the SDK's scope. When `is3D = false`, `data` is the
+inline-completed order result with no `payment3DUrl`.
+
+> `pay` is rate-limited to 20 requests/hour/IP (a 429 raises a
+> [`RateLimitException`](/docs/java/v0.x/errors/)). On `test`, it may return 404 if
+> the POS isn't configured for the company; the SDK validates the request shape and
+> the `payment3DUrl` return, not the bank capture.

@@ -1,0 +1,82 @@
+---
+title: Slots
+description: Read a doctor's real-time availability and build the appointment date for the next step.
+order: 3
+---
+
+# Slots
+
+`client.slots` exposes a single method, `schedule`, which returns a doctor's free
+slots from the materialized availability table. Requires a bearer token.
+
+| Method | Endpoint |
+|--------|----------|
+| `schedule(doctor_id, list_type, *, schedule_date=None, schedule_step=7, schedule_page=1)` | `POST /patients/doctorScheduler` |
+
+> Async: `await client.slots.schedule(...)` on `AsyncBulutklinikClient`.
+
+## `schedule(...)`
+
+`doctor_id` and `list_type` are positional; the windowing options are keyword-only.
+
+```python
+schedule = client.slots.schedule(
+    8282,          # doctor_id, from a doctor search result
+    "interview",   # "interview" → online slots; anything else → physical
+)
+```
+
+`schedule` parameters:
+
+| Parameter       | Type                  | Required | Default | Notes |
+|-----------------|-----------------------|:--------:|---------|-------|
+| `doctor_id`     | `int \| str`          | ✓        | —       | From a doctor search result. |
+| `list_type`     | `str`                 | ✓        | —       | `"interview"` → online slots; anything else → physical. |
+| `schedule_date` | `str \| None`         | —        | `None`  | `YYYY-MM-DD`, today..+21. When omitted, the window is paged. |
+| `schedule_step` | `int \| str`          | —        | `7`     | Window size (days). |
+| `schedule_page` | `int \| str`          | —        | `1`     | Window page. |
+
+You can either request a single day with `schedule_date`, or page across a rolling
+window with `schedule_step` + `schedule_page`:
+
+```python
+# A specific day:
+schedule = client.slots.schedule(8282, "interview", schedule_date="2026-06-20")
+
+# Or page a rolling window (7-day pages):
+page2 = client.slots.schedule(8282, "interview", schedule_step=7, schedule_page=2)
+```
+
+## The result
+
+`schedule` returns a **date-keyed dict** (`YYYY-MM-DD` → list of slots). Empty days
+are `[]`.
+
+```python
+# {
+#   "2026-06-20": [
+#     {"slotId": 1, "slotStart": "14:30:00", "slotEnd": "14:50:00", "available": True},
+#     ...
+#   ],
+#   "2026-06-21": []
+# }
+```
+
+Each slot has `slotId`, `slotStart` / `slotEnd` (`HH:mm:ss`) and `available`.
+
+## Building the appointment date
+
+The next step ([Appointments](/docs/python/v0.x/appointments/) /
+[Payments](/docs/python/v0.x/payments/)) expects `appointment_date` as
+`"YYYY-MM-DD HH:mm"` — the **date key + `slotStart` with the seconds dropped**:
+
+```python
+date, slots = next((d, s) for d, s in schedule.items() if s)
+slot = slots[0]
+appointment_date = f"{date} {slot['slotStart'][:5]}"  # "2026-06-20 14:30"
+
+client.appointments.reserve_interview(8282, appointment_date)
+```
+
+> The server resolves the actual slot from `doctor_id` + `appointment_date`; you do
+> not send `slotId` when reserving or paying.

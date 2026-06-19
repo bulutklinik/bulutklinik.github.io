@@ -1,0 +1,122 @@
+---
+title: Payments
+description: Validate discount codes, manage saved cards, and start a 3-D Secure appointment payment.
+order: 5
+---
+
+# Payments
+
+`client.payments()` handles discount checks, saved cards and the appointment payment
+entrypoint. All methods require a bearer token and return an `` `nlohmann::json` ``.
+The amount is always computed **server-side** — you never send a price.
+
+| Method | Endpoint |
+|--------|----------|
+| `check_discount_code(check_type, discount_code, doctor_id?, …)` | `POST /patients/checkDiscountCode` |
+| `get_cards()` | `GET /payments/getCards` |
+| `save_card(card)` | `POST /payments/saveCard` |
+| `pay(input)` | `POST /payments/interviewPayment` |
+| `delete_card(card_id)` | `DELETE /payments/deleteCard/{cardId}` |
+
+## `check_discount_code`
+
+Validate a discount code before paying. (Note: this endpoint lives under the
+`patients` prefix, not `payments`.)
+
+```cpp
+auto discount = client.payments().check_discount_code(
+    "appointment",   // check_type
+    "WELCOME10",     // discount_code
+    "8282");         // doctor_id
+```
+
+Parameters:
+
+| Parameter            | Type                          | Required | Notes |
+|----------------------|-------------------------------|:--------:|-------|
+| `check_type`         | `std::string`                 | ✓        | `"question"` \| `"appointment"` \| `"lab"` \| `"special"` \| `"physicallyAppointment"` \| `"tmcLab"` \| `"program"`. |
+| `discount_code`      | `std::string`                 | ✓        | The code to validate. |
+| `doctor_id`          | `std::optional<std::string>`  | ✓*       | Required except `lab` / `tmcLab` / `program`. |
+| `order_id`           | `std::optional<std::string>`  | —        | Per check type. |
+| `special_service_id` | `std::optional<std::string>`  | —        | For `special`. |
+| `program_slug`       | `std::optional<std::string>`  | —        | For `program`. |
+
+A valid code returns `{ discount_code, discount_title, discount_id, prices }`.
+
+## Saved cards
+
+```cpp
+auto cards = client.payments().get_cards();
+// cards["cards"]: [{ id, card_holder_name, card_number (masked), card_type, created_at }]
+
+bulutklinik::CardInfo card;
+card.card_holder = "Ada Lovelace";
+card.card_number = "4111111111111111";
+card.card_exp_month = "12";  // "m"
+card.card_exp_year = "2030"; // "Y"
+card.card_cvv = "123";
+client.payments().save_card(card);
+
+client.payments().delete_card(card_id); // card_id (std::string) from get_cards()
+```
+
+`CardInfo` fields are all required:
+
+| Field            | Type          | Notes |
+|------------------|---------------|-------|
+| `card_holder`    | `std::string` | Cardholder name. |
+| `card_number`    | `std::string` | PAN. |
+| `card_exp_month` | `std::string` | `m`. |
+| `card_exp_year`  | `std::string` | `Y`. |
+| `card_cvv`       | `std::string` | CVV. |
+
+## `pay`
+
+Start an appointment payment via a `PaymentInput`. Provide **either** a new
+`card_info` (all-or-none) **or** a saved `card_id`.
+
+```cpp
+bulutklinik::PaymentInput input;
+input.doctor_id = "8282";
+input.appointment_date = "2026-06-20 14:30"; // "Y-m-d H:i"
+input.appointment_type = "interview";         // "interview" | "appointment"
+input.is_3d = true;
+input.terms_accept = true;
+input.card_id = saved_card_id;                // …or input.card_info = { … }
+input.save_card = 0;                          // 1 tokenizes a new card
+input.discount_code = "WELCOME10";            // optional
+
+auto result = client.payments().pay(input);
+
+if (result.contains("payment3DUrl")) {
+    // Open this URL in a browser to complete 3-D Secure.
+    std::string url = result["payment3DUrl"].get<std::string>();
+}
+```
+
+`PaymentInput` fields:
+
+| Field              | Type                          | Required | Notes |
+|--------------------|-------------------------------|:--------:|-------|
+| `doctor_id`        | `std::string`                 | ✓        | — |
+| `appointment_date` | `std::string` (`Y-m-d H:i`)   | ✓        | — |
+| `is_3d`            | `bool`                        | ✓        | `true` returns a `payment3DUrl`. Default `false`. |
+| `terms_accept`     | `bool`                        | ✓        | Must be `true`. Default `false`. |
+| `appointment_type` | `std::string`                 | —        | Default `"interview"`. |
+| `card_info`        | `std::optional<CardInfo>`     | —*       | A new card (all-or-none)… |
+| `card_id`          | `std::optional<std::string>`  | —*       | …or a saved card id. |
+| `save_card`        | `int` (`0` \| `1`)            | —        | `1` tokenizes the card. Default `0`. |
+| `discount_code`    | `std::string`                 | —        | Optional. |
+| `case_detail`      | `std::optional<std::string>`  | —        | Opaque encrypted blob, passed through verbatim. |
+
+## 3-D Secure
+
+On a 3DS flow (`is_3d = true`) the result carries `payment3DUrl` — a **browser URL**
+to open. The SDK returns it verbatim and does **not** follow, open or parse it.
+3DS completion (the "provizyon kapatma" / capture) happens browser ↔ bank ↔ server
+via a callback, which is outside the SDK's scope. When `is_3d = false`, `data` is the
+inline-completed order result with no `payment3DUrl`.
+
+> `pay` is rate-limited to 20 requests/hour/IP. On `test`, it may return 404 if the
+> POS isn't configured for the company; the SDK validates the request shape and the
+> `payment3DUrl` return, not the bank capture.

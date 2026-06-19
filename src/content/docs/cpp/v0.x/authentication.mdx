@@ -1,0 +1,210 @@
+---
+title: Authentication
+description: Log in, handle two-factor challenges, refresh and revoke tokens, and plug in custom token storage.
+order: 1
+---
+
+# Authentication
+
+Bulutklinik uses OAuth2 (Laravel Passport). The token grant happens server-side
+inside `connect` — the SDK never calls `oauth/token` directly. Access tokens last
+~30 days and refresh tokens ~130 days.
+
+`client.auth()` exposes five methods: `connect`, `connect_with_two_factor`,
+`register_patient`, `refresh` and `disconnect`. Tokens obtained by `connect` /
+`connect_with_two_factor` / `register_patient` are stored automatically.
+
+> `register_patient` is named to avoid the C++ keyword `register`.
+
+| Method | Endpoint |
+|--------|----------|
+| `connect(api_user_name, api_user_password, login_mode, …)` | `POST /general/connectApi` |
+| `connect_with_two_factor(sms_verification_code, response)` | `POST /general/connectApiWithTwoFactor` |
+| `register_patient(input)` | `POST /patients/addNewPatient` |
+| `refresh()` | `POST /general/refreshApi` |
+| `disconnect()` | `POST /general/disconnectApi` |
+
+## `connect`
+
+`POST /general/connectApi` · public (no bearer token). Returns a `LoginResult`.
+
+```cpp
+auto login = client.auth().connect(
+    "patient@example.com",
+    std::string("•••••••"),
+    "email");
+```
+
+Parameters:
+
+| Parameter            | Type                            | Required | Notes |
+|----------------------|---------------------------------|:--------:|-------|
+| `api_user_name`      | `std::string`                   | ✓        | Identifier per `login_mode` (email / TC / phone / user id). |
+| `api_user_password`  | `std::optional<std::string>`    | ✓*       | Required except in `social` / `afterRegister` modes; pass `std::nullopt` to omit. |
+| `login_mode`         | `std::string`                   | ✓        | `"email"` \| `"identity"` \| `"phone"` \| `"user_id"` \| `"social"` \| `"afterRegister"`. |
+| `client_id`          | `std::optional<std::string>`    | —        | Defaults to the client's configured `client_id`. |
+| `client_secret`      | `std::optional<std::string>`    | —        | Defaults to the client's configured `client_secret`. |
+| `with_phone_number`  | `std::optional<std::string>`    | —        | Some installs require it in `phone` mode. |
+
+`connect` returns a `LoginResult` — **always check `two_factor_required`**:
+
+```cpp
+struct LoginResult {
+    bool two_factor_required = false;
+    std::optional<std::string> two_factor_response;
+};
+
+auto login = client.auth().connect(api_user_name, std::string(password), "email");
+
+if (login.two_factor_required) {
+    // login.two_factor_response holds an encrypted blob — forward it with the SMS code.
+} else {
+    // Logged in. Tokens are already stored.
+}
+```
+
+When SMS two-factor is enabled the response carries no access token; instead it
+returns an encrypted `two_factor_response` blob to forward to
+`connect_with_two_factor`.
+
+## `connect_with_two_factor`
+
+`POST /general/connectApiWithTwoFactor` · public.
+
+```cpp
+client.auth().connect_with_two_factor("123456", *login.two_factor_response);
+```
+
+Tokens are minted during `connect` and returned (and stored) here. The SDK sends
+only `smsVerificationCode` + `response`. Returns `void`.
+
+## `register_patient`
+
+`POST /patients/addNewPatient` · public (guarded by SMS verification + throttle).
+Takes a `RegisterInput` struct and returns `void`.
+
+```cpp
+bulutklinik::RegisterInput input;
+input.name = "Ada";
+input.surname = "Lovelace";
+input.api_user_name = "+90 555 111 22 33"; // same +CC value as phone_number
+input.phone_number = "+90 555 111 22 33";
+input.password = "•••••••";
+input.sms_verification_code = "123456";
+input.response = sms_verify_blob; // from the prior SMS-verification step
+
+client.auth().register_patient(input);
+```
+
+`RegisterInput` fields:
+
+| Field                   | Type                          | Required | Default |
+|-------------------------|-------------------------------|:--------:|---------|
+| `name`                  | `std::string`                 | ✓        | — |
+| `surname`               | `std::string`                 | ✓        | — |
+| `api_user_name`         | `std::string`                 | ✓        | — |
+| `phone_number`          | `std::string`                 | ✓        | — |
+| `password`              | `std::string`                 | ✓        | — |
+| `sms_verification_code` | `std::string`                 | ✓        | — |
+| `response`              | `std::string`                 | ✓        | — |
+| `accept_user_agreement` | `int`                         | —        | `1` |
+| `client_id`             | `std::optional<std::string>`  | —        | client's `client_id` |
+| `client_secret`         | `std::optional<std::string>`  | —        | client's `client_secret` |
+
+Rules enforced by the API:
+
+- `phone_number` must start with `+` and a country code (e.g. `+90 555 111 22 33`); bare digits are rejected.
+- `api_user_name` should equal `phone_number` (the `+CC` form) — it becomes the `afterRegister` login username.
+- `accept_user_agreement` defaults to `1`.
+
+> The SMS-verification step that produces the `response` blob is **not** part of
+> the SDK surface; obtain `response` + `sms_verification_code` beforehand. On success
+> the patient is created and auto-logged-in (`afterRegister`), so tokens are stored.
+
+## Silent auto-refresh & retry
+
+Every protected call carries the stored access token. If the API answers `401`
+(or `resultType 4`, the refresh signal) and a refresh token is available, the SDK:
+
+1. calls `refresh` with the stored refresh token + client credentials,
+2. persists the rotated tokens,
+3. retries the original request **once**.
+
+The retry is bounded to one attempt, and concurrent 401s share a single in-flight
+refresh guarded by a mutex (no refresh stampede). If the refresh fails — or the API
+returns `resultType 2` (logout) — the token store is cleared and an
+[`AuthenticationError`](/docs/cpp/v0.x/errors/) is thrown.
+
+You rarely need to call `refresh` yourself, but it is available:
+
+```cpp
+client.auth().refresh(); // POST /general/refreshApi
+```
+
+> `refresh` requires `client_id` / `client_secret` on the client and a stored
+> refresh token; otherwise it throws an `AuthenticationError`.
+
+## `disconnect`
+
+`POST /general/disconnectApi` · bearer. Revokes the tokens server-side, then clears
+the local token store (even if the network call fails).
+
+```cpp
+client.auth().disconnect();
+```
+
+## Token store
+
+Tokens live in a pluggable `TokenStore`. The default is an in-memory store
+(`InMemoryTokenStore`, lost on process exit). Subclass `TokenStore` to persist to a
+file, database or secure storage:
+
+```cpp
+#include <bulutklinik/bulutklinik.hpp>
+
+class FileTokenStore : public bulutklinik::TokenStore {
+public:
+    std::optional<std::string> access_token() const override { return read_token("access"); }
+    std::optional<std::string> refresh_token() const override { return read_token("refresh"); }
+    void set_tokens(const std::string& access,
+                    const std::optional<std::string>& refresh) override {
+        write_tokens(access, refresh);
+    }
+    void clear() override { clear_tokens(); }
+};
+
+bulutklinik::ClientOptions options;
+options.client_id = client_id;
+options.client_secret = client_secret;
+options.token_store = std::make_shared<FileTokenStore>();
+bulutklinik::Client client(options);
+```
+
+The `TokenStore` interface:
+
+```cpp
+class TokenStore {
+public:
+    virtual ~TokenStore() = default;
+    virtual std::optional<std::string> access_token() const = 0;
+    virtual std::optional<std::string> refresh_token() const = 0;
+    virtual void set_tokens(const std::string& access,
+                            const std::optional<std::string>& refresh) = 0;
+    virtual void clear() = 0;
+};
+```
+
+The bundled `InMemoryTokenStore` can be seeded with existing tokens — handy for
+resuming a session:
+
+```cpp
+bulutklinik::ClientOptions options;
+options.client_id = client_id;
+options.client_secret = client_secret;
+options.token_store =
+    std::make_shared<bulutklinik::InMemoryTokenStore>(access_token, refresh_token);
+bulutklinik::Client client(options);
+```
+
+The active store is also reachable as `client.token_store()` (returns a
+`` `TokenStore&` ``).

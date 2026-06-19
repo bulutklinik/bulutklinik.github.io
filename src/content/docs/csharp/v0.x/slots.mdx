@@ -1,0 +1,102 @@
+---
+title: Slots
+description: Read a doctor's real-time availability and build the appointment date for the next step.
+order: 3
+---
+
+# Slots
+
+`client.Slots` exposes a single method, `ScheduleAsync`, which returns a doctor's
+free slots from the materialized availability table. Requires a bearer token and
+returns a `Task<JsonElement>`.
+
+| Method            | Endpoint |
+|-------------------|----------|
+| `ScheduleAsync(doctorId, listType, …)` | `POST /patients/doctorScheduler` |
+
+## `ScheduleAsync`
+
+```csharp
+var schedule = await client.Slots.ScheduleAsync(
+    8282,           // doctorId
+    "interview");   // "interview" → online slots; "appointment" → physical
+```
+
+The full signature:
+
+```csharp
+Task<JsonElement> ScheduleAsync(
+    object doctorId,
+    string listType,
+    string? scheduleDate = null,
+    object? scheduleStep = null,
+    object? schedulePage = null,
+    CancellationToken cancellationToken = default);
+```
+
+| Parameter      | Type      | Required | Notes |
+|----------------|-----------|:--------:|-------|
+| `doctorId`     | `object`  | ✓        | From a doctor search result (`int`, `long` or `string`). |
+| `listType`     | `string`  | ✓        | `"interview"` → online slots; anything else → physical. |
+| `scheduleDate` | `string?` | —        | `yyyy-MM-dd`, today..+21. When omitted, the window is paged. |
+| `scheduleStep` | `object?` | —        | Window size (days). Defaults to `7`. |
+| `schedulePage` | `object?` | —        | Window page. Defaults to `1`. |
+
+You can either request a single day with `scheduleDate`, or page across a rolling
+window with `scheduleStep` + `schedulePage`.
+
+## The result
+
+`ScheduleAsync` returns a **date-keyed object** (`yyyy-MM-dd` → array of slots).
+Empty days are `[]`.
+
+```jsonc
+// {
+//   "2026-06-20": [
+//     { "slotId": 1, "slotStart": "14:30:00", "slotEnd": "14:50:00", "available": true },
+//     ...
+//   ],
+//   "2026-06-21": []
+// }
+```
+
+Each slot has `slotId`, `slotStart` / `slotEnd` (`HH:mm:ss`) and `available`. Walk
+the date-keyed object with `EnumerateObject`:
+
+```csharp
+foreach (var day in schedule.EnumerateObject())
+{
+    string date = day.Name;                // "2026-06-20"
+    foreach (var slot in day.Value.EnumerateArray())
+    {
+        string start = slot.GetProperty("slotStart").GetString()!; // "14:30:00"
+        bool available = slot.GetProperty("available").GetBoolean();
+    }
+}
+```
+
+## Building the appointment date
+
+The next step ([Appointments](/docs/csharp/v0.x/appointments/) /
+[Payments](/docs/csharp/v0.x/payments/)) expects `appointmentDate` as
+`"yyyy-MM-dd HH:mm"` — the **date key + `slotStart` with the seconds dropped**:
+
+```csharp
+foreach (var day in schedule.EnumerateObject())
+{
+    var slots = day.Value;
+    if (slots.GetArrayLength() == 0)
+    {
+        continue;
+    }
+
+    string start = slots[0].GetProperty("slotStart").GetString()!; // "14:30:00"
+    string appointmentDate = $"{day.Name} {start[..5]}";           // "2026-06-20 14:30"
+
+    await client.Appointments.ReserveInterviewAsync(8282, appointmentDate);
+    break;
+}
+```
+
+> The server resolves the actual slot from `doctorId` + `appointmentDate`; you do
+> not send `slotId` when reserving or paying.

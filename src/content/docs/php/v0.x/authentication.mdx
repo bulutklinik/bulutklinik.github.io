@@ -1,0 +1,200 @@
+---
+title: Authentication
+description: Log in, handle two-factor challenges, refresh and revoke tokens, and plug in custom token storage.
+order: 1
+---
+
+# Authentication
+
+Bulutklinik uses OAuth2 (Laravel Passport). The token grant happens server-side
+inside `connect` — the SDK never calls `oauth/token` directly. Access tokens last
+~30 days and refresh tokens ~130 days.
+
+`$client->auth` exposes five methods: `connect`, `connectWithTwoFactor`, `register`,
+`refresh` and `disconnect`. Tokens obtained by `connect` / `connectWithTwoFactor` /
+`register` are stored automatically.
+
+## `auth->connect`
+
+`POST /general/connectApi` · public (no bearer token).
+
+```php
+$login = $client->auth->connect('patient@example.com', '•••••••', 'email');
+```
+
+`connect` parameters:
+
+| Parameter         | Type       | Required | Notes |
+|-------------------|------------|:--------:|-------|
+| `apiUserName`     | `string`   | ✓        | Identifier per `loginMode` (email / TC / phone / user id). |
+| `apiUserPassword` | `?string`  | ✓*       | Required except in `social` / `afterRegister` modes; pass `null` there. |
+| `loginMode`       | `string`   | ✓        | `email` \| `identity` \| `phone` \| `user_id` \| `social` \| `afterRegister`. |
+| `clientId`        | `?string`  | —        | Defaults to the config's `clientId`. |
+| `clientSecret`    | `?string`  | —        | Defaults to the config's `clientSecret`. |
+| `withPhoneNumber` | `?string`  | —        | Some installs require it in `phone` mode. |
+
+The return value is a `LoginResult` — **always check `twoFactorRequired`**:
+
+```php
+$login = $client->auth->connect($apiUserName, $apiUserPassword, 'email');
+
+if ($login->twoFactorRequired) {
+    // $login->twoFactorResponse is an encrypted blob — forward it with the SMS code.
+} else {
+    // Logged in. Tokens are already stored.
+}
+```
+
+`LoginResult` has two readonly properties: `bool $twoFactorRequired` and
+`?string $twoFactorResponse`. When SMS two-factor is enabled the response carries no
+access token; instead it returns an encrypted `twoFactorResponse` blob to forward to
+`connectWithTwoFactor`.
+
+## `auth->connectWithTwoFactor`
+
+`POST /general/connectApiWithTwoFactor` · public.
+
+```php
+$client->auth->connectWithTwoFactor('123456', $login->twoFactorResponse);
+```
+
+Parameters are `string $smsVerificationCode` and `string $response` (the blob from
+`connect`). Tokens are minted during `connect` and returned (and stored) here. The
+method returns `void`; the SDK sends only `smsVerificationCode` + `response`.
+
+## `auth->register`
+
+`POST /patients/addNewPatient` · public (guarded by SMS verification + throttle).
+
+```php
+$client->auth->register(
+    name: 'Ada',
+    surname: 'Lovelace',
+    apiUserName: '+90 555 111 22 33', // same +CC value as phoneNumber
+    phoneNumber: '+90 555 111 22 33',
+    password: '•••••••',
+    smsVerificationCode: '123456',
+    response: $smsVerifyBlob, // from the prior SMS-verification step
+);
+```
+
+`register` parameters: `name`, `surname`, `apiUserName`, `phoneNumber`, `password`,
+`smsVerificationCode`, `response` (all `string`, required), plus
+`int $acceptUserAgreement = 1` and optional `?string $clientId` / `?string $clientSecret`.
+
+Rules enforced by the API:
+
+- `phoneNumber` must start with `+` and a country code (e.g. `+90 555 111 22 33`); bare digits are rejected.
+- `apiUserName` should equal `phoneNumber` (the `+CC` form) — it becomes the `afterRegister` login username.
+- `acceptUserAgreement` defaults to `1`.
+
+> The SMS-verification step that produces the `response` blob is **not** part of
+> the SDK surface; obtain `response` + `smsVerificationCode` beforehand. On success
+> the patient is created and auto-logged-in (`afterRegister`), so tokens are stored.
+> `register` returns `void`.
+
+## Silent auto-refresh & retry
+
+Every protected call carries the stored access token. If the API answers `401`
+(or `resultType 4`, the refresh signal) and a refresh token is available, the SDK:
+
+1. calls the refresh endpoint with the stored refresh token + client credentials,
+2. persists the rotated tokens,
+3. retries the original request **once**.
+
+The retry is bounded to one attempt. If the refresh fails — or the API returns
+`resultType 2` (logout) — the token store is cleared and an
+[`AuthenticationException`](/docs/php/v0.x/errors/) is thrown.
+
+You rarely need to call `refresh` yourself, but it is available:
+
+```php
+$client->auth->refresh(); // POST /general/refreshApi
+```
+
+> `refresh` requires `clientId` / `clientSecret` on the config and a stored refresh
+> token. It returns `void` and throws `AuthenticationException` on failure.
+
+## `auth->disconnect`
+
+`POST /general/disconnectApi` · bearer. Revokes the tokens server-side, then clears
+the local token store (even if the network call fails — the clear runs in a
+`finally`).
+
+```php
+$client->auth->disconnect();
+```
+
+## Token store
+
+Tokens live in a pluggable `TokenStore`. The default is `InMemoryTokenStore` (lost
+on process exit). Implement the interface to persist to a file, cache, database or
+session:
+
+```php
+<?php
+
+use Bulutklinik\Sdk\Token\TokenStore;
+
+final class FileTokenStore implements TokenStore
+{
+    public function getAccessToken(): ?string
+    {
+        return readToken('access');
+    }
+
+    public function getRefreshToken(): ?string
+    {
+        return readToken('refresh');
+    }
+
+    public function setTokens(string $accessToken, ?string $refreshToken): void
+    {
+        writeTokens($accessToken, $refreshToken);
+    }
+
+    public function clear(): void
+    {
+        clearTokens();
+    }
+}
+
+$client = new BulutklinikClient(new ClientConfig(
+    clientId: $clientId,
+    clientSecret: $clientSecret,
+    tokenStore: new FileTokenStore(),
+));
+```
+
+The `TokenStore` interface:
+
+```php
+interface TokenStore
+{
+    public function getAccessToken(): ?string;
+
+    public function getRefreshToken(): ?string;
+
+    public function setTokens(string $accessToken, ?string $refreshToken): void;
+
+    public function clear(): void;
+}
+```
+
+The bundled `InMemoryTokenStore` can be seeded with existing tokens — handy for
+resuming a session:
+
+```php
+<?php
+
+use Bulutklinik\Sdk\Token\InMemoryTokenStore;
+
+$tokenStore = new InMemoryTokenStore($accessToken, $refreshToken);
+$client = new BulutklinikClient(new ClientConfig(
+    clientId: $clientId,
+    clientSecret: $clientSecret,
+    tokenStore: $tokenStore,
+));
+```
+
+The active store is also reachable as `$client->tokenStore`.

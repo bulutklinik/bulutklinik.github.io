@@ -1,0 +1,145 @@
+---
+title: Overview
+description: Install the Bulutklinik C++ SDK and make your first authenticated API call.
+order: 0
+---
+
+# C++ SDK
+
+The official Bulutklinik API SDK for C++. It is hand-written, modern C++17, and
+built on [cpr](https://github.com/libcpr/cpr) (libcurl) for transport and
+[nlohmann/json](https://github.com/nlohmann/json) for payloads.
+
+It covers the patient flow end to end: **authentication, doctor search, availability
+slots, appointments, payments (3-D Secure) and health measures** — 6 service groups
+over 27 endpoints.
+
+- **Package:** `bulutklinik` (vcpkg · Conan · CMake `find_package`)
+- **Source:** [github.com/bulutklinik/cpp-sdk](https://github.com/bulutklinik/cpp-sdk)
+- **Spec version:** 0.1.0 (API v3)
+
+Everything lives under the `bulutklinik` namespace and the single public header
+`` `#include <bulutklinik/bulutklinik.hpp>` ``.
+
+## Install
+
+The SDK is consumed through CMake. Add the dependency to your `vcpkg.json`
+(or use the bundled Conan recipe), then link the imported target:
+
+```cmake
+find_package(bulutklinik CONFIG REQUIRED)
+target_link_libraries(your_app PRIVATE bulutklinik::sdk)
+```
+
+With vcpkg, declare the dependency in `vcpkg.json`:
+
+```json
+{
+  "dependencies": ["bulutklinik"]
+}
+```
+
+and configure with the vcpkg toolchain:
+
+```bash
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+cmake --build build
+```
+
+Conan users can install the recipe instead (`conan create .`); either way the
+transitive dependencies (cpr/libcurl + nlohmann/json) are pulled in for you.
+
+## Quick start
+
+Construct the client once and reuse it; each service group is exposed through an
+accessor method. Data methods return an `` `nlohmann::json` `` (the unwrapped
+`data` payload); failures throw a typed exception.
+
+```cpp
+#include <bulutklinik/bulutklinik.hpp>
+#include <iostream>
+#include <string>
+
+int main() {
+    bulutklinik::ClientOptions options;
+    options.environment = bulutklinik::Environment::Production; // Production | Test | Local
+    options.client_id = "your-oauth-client-id";
+    options.client_secret = "your-oauth-client-secret";
+    bulutklinik::Client client(options);
+
+    // 1) Log in — tokens are stored automatically.
+    auto login = client.auth().connect(
+        "patient@example.com",
+        std::string("•••••••"),
+        "email");
+    if (login.two_factor_required) {
+        client.auth().connect_with_two_factor("123456", *login.two_factor_response);
+    }
+
+    // 2) Search for a doctor.
+    bulutklinik::SearchInput input;
+    input.search_params = {{"withFreeText", "kardiyoloji"}};
+    input.order_params = {"slot"};
+    input.current_page = 1;
+    auto result = client.doctors().search(input);
+    std::string doctor_id =
+        std::to_string(result["foundDoctors"][0]["doctor_id"].get<int>());
+
+    // 3) Read the doctor's free slots.
+    auto schedule = client.slots().schedule(doctor_id, "interview");
+
+    // 4) Reserve an online appointment ("Y-m-d H:i").
+    client.appointments().reserve_interview(doctor_id, "2026-06-20 14:30");
+}
+```
+
+Every data method returns the unwrapped `data` payload from the response envelope
+(see [Errors & responses](/docs/cpp/v0.x/errors/)) as an `` `nlohmann::json` ``;
+failures throw a typed exception.
+
+## Client configuration
+
+`bulutklinik::Client` takes a `ClientOptions` struct (all fields optional):
+
+| Option          | Type                              | Default                  | Purpose |
+|-----------------|-----------------------------------|--------------------------|---------|
+| `environment`   | `Environment`                     | `Environment::Production`| Named base-URL preset. Ignored when `base_url` is set. |
+| `base_url`      | `std::optional<std::string>`      | —                        | Explicit base URL; overrides `environment`. Trailing slashes are stripped. |
+| `lang`          | `std::string`                     | `"tr"`                   | `lang` header sent with every request (`tr` \| `en` \| `de` \| `az`). |
+| `client_id`     | `std::optional<std::string>`      | —                        | OAuth client id (used by `connect` and token refresh). |
+| `client_secret` | `std::optional<std::string>`      | —                        | OAuth client secret. |
+| `partner_token` | `std::optional<std::string>`      | —                        | Bearer token for the partner (`teusan`) measures endpoint. |
+| `token_store`   | `std::shared_ptr<TokenStore>`     | in-memory                | Pluggable token persistence (see [Authentication](/docs/cpp/v0.x/authentication/)). |
+| `http_backend`  | `std::shared_ptr<HttpBackend>`    | cpr (libcurl)            | Injectable HTTP transport (e.g. for testing). |
+| `timeout_ms`    | `long`                            | `30000`                  | Per-request timeout in milliseconds. |
+
+### Environments
+
+| Environment             | Base URL |
+|-------------------------|----------|
+| `Environment::Production` | `https://api.bulutklinik.com/api/v3` |
+| `Environment::Test`       | `https://apitest.bulutklinik.com/api/v3` |
+| `Environment::Local`      | `https://api-bulutklinik.test/api/v3` |
+
+Set `base_url` to point at any other host; it takes precedence over `environment`.
+
+## Service groups
+
+| Accessor                  | Covered in |
+|---------------------------|------------|
+| `client.auth()`           | [Authentication](/docs/cpp/v0.x/authentication/) |
+| `client.doctors()`        | [Doctors](/docs/cpp/v0.x/doctors/) |
+| `client.slots()`          | [Slots](/docs/cpp/v0.x/slots/) |
+| `client.appointments()`   | [Appointments](/docs/cpp/v0.x/appointments/) |
+| `client.payments()`       | [Payments](/docs/cpp/v0.x/payments/) |
+| `client.measures()`       | [Measures](/docs/cpp/v0.x/measures/) |
+
+## Types & idioms
+
+Request inputs are plain structs (`SearchInput`, `PaymentInput`, `CardInfo`,
+`RegisterInput`); optional parameters are `` `std::optional<std::string>` `` with
+sensible defaults. Identifiers (doctor id, event id, card id, measure id) are
+passed as `` `std::string` ``. Two methods are renamed to dodge C++ keywords:
+`register_patient` (for `register`) on `client.auth()` and `delete_measure` (for
+`delete`) on `client.measures()`. All data-returning methods hand back an
+`` `nlohmann::json` `` so you can read fields directly.

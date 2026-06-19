@@ -1,0 +1,217 @@
+---
+title: Authentication
+description: Log in, handle two-factor challenges, refresh and revoke tokens, and plug in custom token storage.
+order: 1
+---
+
+# Authentication
+
+Bulutklinik uses OAuth2 (Laravel Passport). The token grant happens server-side
+inside `ConnectAsync` — the SDK never calls `oauth/token` directly. Access tokens
+last ~30 days and refresh tokens ~130 days.
+
+`client.Auth` exposes five methods: `ConnectAsync`, `ConnectWithTwoFactorAsync`,
+`RegisterAsync`, `RefreshAsync` and `DisconnectAsync`. Tokens obtained by
+`ConnectAsync` / `ConnectWithTwoFactorAsync` / `RegisterAsync` are stored automatically.
+
+| Method | Endpoint |
+|--------|----------|
+| `ConnectAsync(apiUserName, apiUserPassword, loginMode, …)` | `POST /general/connectApi` |
+| `ConnectWithTwoFactorAsync(smsVerificationCode, response, …)` | `POST /general/connectApiWithTwoFactor` |
+| `RegisterAsync(input, …)` | `POST /patients/addNewPatient` |
+| `RefreshAsync(…)` | `POST /general/refreshApi` |
+| `DisconnectAsync(…)` | `POST /general/disconnectApi` |
+
+## `ConnectAsync`
+
+`POST /general/connectApi` · public (no bearer token). Returns a `Task<LoginResult>`.
+
+```csharp
+var login = await client.Auth.ConnectAsync(
+    "patient@example.com",
+    "•••••••",
+    "email");
+```
+
+The full signature:
+
+```csharp
+Task<LoginResult> ConnectAsync(
+    string apiUserName,
+    string? apiUserPassword,
+    string loginMode,
+    string? clientId = null,
+    string? clientSecret = null,
+    string? withPhoneNumber = null,
+    CancellationToken cancellationToken = default);
+```
+
+| Parameter         | Type      | Required | Notes |
+|-------------------|-----------|:--------:|-------|
+| `apiUserName`     | `string`  | ✓        | Identifier per `loginMode` (email / TC / phone / user id). |
+| `apiUserPassword` | `string?` | ✓*       | Required except in `social` / `afterRegister` modes — pass `null` there. |
+| `loginMode`       | `string`  | ✓        | `"email"`, `"identity"`, `"phone"`, `"user_id"`, `"social"` or `"afterRegister"`. |
+| `clientId`        | `string?` | —        | Defaults to the client's configured `ClientId`. |
+| `clientSecret`    | `string?` | —        | Defaults to the client's configured `ClientSecret`. |
+| `withPhoneNumber` | `string?` | —        | Some installs require it in `phone` mode. |
+
+The result is a `LoginResult` record — **always check `TwoFactorRequired`**:
+
+```csharp
+var login = await client.Auth.ConnectAsync(apiUserName, apiUserPassword, "email");
+
+if (login.TwoFactorRequired)
+{
+    // login.TwoFactorResponse is an encrypted blob — pass it on with the SMS code.
+}
+else
+{
+    // Logged in. Tokens are already stored on the client's token store.
+}
+```
+
+`LoginResult` is `record LoginResult(bool TwoFactorRequired, string? TwoFactorResponse = null)`.
+When SMS two-factor is enabled the response carries no access token; instead it
+returns an encrypted `TwoFactorResponse` blob (non-null) to forward to
+`ConnectWithTwoFactorAsync`.
+
+## `ConnectWithTwoFactorAsync`
+
+`POST /general/connectApiWithTwoFactor` · public. Returns a `Task` (no value).
+
+```csharp
+await client.Auth.ConnectWithTwoFactorAsync(
+    "123456",
+    login.TwoFactorResponse!); // the blob from ConnectAsync
+```
+
+The signature is `Task ConnectWithTwoFactorAsync(string smsVerificationCode, string response, CancellationToken cancellationToken = default)`.
+Tokens are minted during `ConnectAsync` and returned (and stored) here. The SDK
+sends only `smsVerificationCode` + `response`.
+
+## `RegisterAsync`
+
+`POST /patients/addNewPatient` · public (guarded by SMS verification + throttle).
+Takes a `RegisterInput` and returns a `Task` (no value).
+
+```csharp
+await client.Auth.RegisterAsync(new RegisterInput
+{
+    Name = "Ada",
+    Surname = "Lovelace",
+    ApiUserName = "+90 555 111 22 33", // same +CC value as PhoneNumber
+    PhoneNumber = "+90 555 111 22 33",
+    Password = "•••••••",
+    SmsVerificationCode = "123456",
+    Response = smsVerifyBlob, // from the prior SMS-verification step
+});
+```
+
+`RegisterInput` fields:
+
+| Field                 | Type      | Required | Default | Notes |
+|-----------------------|-----------|:--------:|---------|-------|
+| `Name`                | `string`  | ✓        | —       | `required` member. |
+| `Surname`             | `string`  | ✓        | —       | `required` member. |
+| `ApiUserName`         | `string`  | ✓        | —       | The `afterRegister` login username; send the same `+CC` value as `PhoneNumber`. |
+| `PhoneNumber`         | `string`  | ✓        | —       | Must start with `+` and a country code. |
+| `Password`            | `string`  | ✓        | —       | `required` member. |
+| `SmsVerificationCode` | `string`  | ✓        | —       | From the prior SMS-verify step. |
+| `Response`            | `string`  | ✓        | —       | Encrypted blob from the prior SMS-verify step. |
+| `AcceptUserAgreement` | `int`     | —        | `1`     | Sent as `1` (a `0` is coerced to `1`). |
+| `ClientId`            | `string?` | —        | `null`  | Defaults to the client's configured `ClientId`. |
+| `ClientSecret`        | `string?` | —        | `null`  | Defaults to the client's configured `ClientSecret`. |
+
+Rules enforced by the API:
+
+- `PhoneNumber` must start with `+` and a country code (e.g. `+90 555 111 22 33`); bare digits are rejected.
+- `ApiUserName` should equal `PhoneNumber` (the `+CC` form) — it becomes the `afterRegister` login username.
+
+> The SMS-verification step that produces the `Response` blob is **not** part of
+> the SDK surface; obtain `Response` + `SmsVerificationCode` beforehand. On success
+> the patient is created and auto-logged-in (`afterRegister`), so tokens are stored.
+
+## Silent auto-refresh & retry
+
+Every protected call carries the stored access token. If the API answers `401`
+(or `resultType 4`, the refresh signal) and a refresh token is available, the SDK:
+
+1. calls the refresh endpoint with the stored refresh token + client credentials,
+2. persists the rotated tokens,
+3. retries the original request **once**.
+
+The retry is bounded to one attempt, and concurrent 401s share a single in-flight
+refresh guarded by a `SemaphoreSlim` (no refresh stampede). If the refresh fails —
+or the API returns `resultType 2` (logout) — the token store is cleared and an
+[`AuthenticationException`](/docs/csharp/v0.x/errors/) is thrown.
+
+You rarely need to call `RefreshAsync` yourself, but it is available:
+
+```csharp
+await client.Auth.RefreshAsync(); // POST /general/refreshApi
+```
+
+> `RefreshAsync` requires `ClientId` / `ClientSecret` on the client and a stored
+> refresh token; otherwise it throws an `AuthenticationException`.
+
+## `DisconnectAsync`
+
+`POST /general/disconnectApi` · bearer. Revokes the tokens server-side, then clears
+the local token store (even if the network call fails).
+
+```csharp
+await client.Auth.DisconnectAsync();
+```
+
+## Token store
+
+Tokens live in a pluggable `ITokenStore`. The default is `InMemoryTokenStore` (lost
+on process exit). Implement the interface to persist to a file, database or secure
+storage:
+
+```csharp
+using Bulutklinik.Sdk;
+
+public sealed class FileTokenStore : ITokenStore
+{
+    public string? GetAccessToken() => ReadToken("access");
+    public string? GetRefreshToken() => ReadToken("refresh");
+    public void SetTokens(string accessToken, string? refreshToken) => WriteTokens(accessToken, refreshToken);
+    public void Clear() => ClearTokens();
+}
+
+var client = new BulutklinikClient(new BulutklinikClientOptions
+{
+    ClientId = clientId,
+    ClientSecret = clientSecret,
+    TokenStore = new FileTokenStore(),
+});
+```
+
+The `ITokenStore` interface:
+
+```csharp
+public interface ITokenStore
+{
+    string? GetAccessToken();
+    string? GetRefreshToken();
+    void SetTokens(string accessToken, string? refreshToken);
+    void Clear();
+}
+```
+
+The bundled `InMemoryTokenStore` can be seeded with existing tokens — handy for
+resuming a session:
+
+```csharp
+var tokenStore = new InMemoryTokenStore(accessToken, refreshToken);
+var client = new BulutklinikClient(new BulutklinikClientOptions
+{
+    ClientId = clientId,
+    ClientSecret = clientSecret,
+    TokenStore = tokenStore,
+});
+```
+
+`InMemoryTokenStore` is thread-safe (its accessors lock internally). The active
+store is also reachable as `client.TokenStore`.

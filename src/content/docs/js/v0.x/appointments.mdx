@@ -1,0 +1,61 @@
+---
+title: Appointments
+description: Reserve online interviews, create physical appointments, and cancel by event id.
+order: 4
+---
+
+# Appointments
+
+`client.appointments` books and cancels appointments. All methods require a bearer
+token. The server resolves the slot from `doctorId` + `appointmentDate` — there is
+no `slotId` in the request.
+
+| Method                     | Endpoint |
+|----------------------------|----------|
+| `reserveInterview(input)`  | `POST /patients/addInterviewDateReservation` |
+| `addPhysical(input)`       | `POST /patients/addNewAppointment` |
+| `cancel(eventId)`          | `DELETE /patients/deleteUserAppointment/{eventId}` |
+
+## `reserveInterview(input)`
+
+Reserve an online (interview) slot. Resolves to `null` on success.
+
+```ts
+await client.appointments.reserveInterview({
+  doctorId: 8282,
+  appointmentDate: "2026-06-20 14:30", // "Y-m-d H:i", today..+21
+});
+```
+
+`ReserveInterviewInput`:
+
+| Field             | Type                            | Required | Default |
+|-------------------|---------------------------------|:--------:|---------|
+| `doctorId`        | `number \| string`              | ✓        | — |
+| `appointmentDate` | `string` (`Y-m-d H:i`)          | ✓        | — |
+| `appointmentType` | `"interview" \| "appointment"`  | —        | `"interview"` |
+
+A successful reservation returns `null` (the API responds `resultType 0`, `data: null`).
+Conflicts and validation failures throw a typed [error](/docs/js/v0.x/errors/).
+
+## `addPhysical(input)`
+
+Create an in-person (physical) appointment. No `appointmentType`.
+
+```ts
+await client.appointments.addPhysical({
+  doctorId: 8282,
+  appointmentDate: "2026-06-20 14:30", // "Y-m-d H:i"
+});
+```
+
+## `cancel(eventId)`
+
+Cancel an appointment by its event id (`cln_events.id`).
+
+```ts
+await client.appointments.cancel(eventId);
+```
+
+> Cancellation can be rejected (server-side) for insurance appointments, once the
+> cancel window has passed, or if the event is not found — these surface as a typed error.

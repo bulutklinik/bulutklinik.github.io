@@ -1,0 +1,74 @@
+---
+title: Slots
+description: Read a doctor's real-time availability and build the appointment date for the next step.
+order: 3
+---
+
+# Slots
+
+`$client->slots` exposes a single method, `schedule`, which returns a doctor's free
+slots from the materialized availability table as a PHP array. Requires a bearer token.
+
+| Method                                                       | Endpoint |
+|--------------------------------------------------------------|----------|
+| `schedule(doctorId, listType, scheduleDate?, scheduleStep?, schedulePage?)` | `POST /patients/doctorScheduler` |
+
+## `schedule(...)`
+
+```php
+$schedule = $client->slots->schedule(
+    doctorId: 8282,
+    listType: 'interview', // "interview" → online slots; "appointment" → physical
+);
+```
+
+`schedule` parameters:
+
+| Parameter      | Type           | Required | Default | Notes |
+|----------------|----------------|:--------:|---------|-------|
+| `doctorId`     | `int\|string`  | ✓        | —       | From a doctor search result. |
+| `listType`     | `string`       | ✓        | —       | `interview` → online slots; anything else → physical. |
+| `scheduleDate` | `?string`      | —        | `null`  | `Y-m-d`, today..+21. When omitted, the window is paged. |
+| `scheduleStep` | `int\|string`  | —        | `7`     | Window size (days). |
+| `schedulePage` | `int\|string`  | —        | `1`     | Window page. |
+
+You can either request a single day with `scheduleDate`, or page across a rolling
+window with `scheduleStep` + `schedulePage`.
+
+## The result
+
+`schedule` returns a **date-keyed map** (`Y-m-d` → array of slots). Empty days are `[]`.
+
+```php
+// [
+//   '2026-06-20' => [
+//     ['slotId' => 1, 'slotStart' => '14:30:00', 'slotEnd' => '14:50:00', 'available' => true],
+//     // …
+//   ],
+//   '2026-06-21' => [],
+// ]
+```
+
+Each slot has `slotId`, `slotStart` / `slotEnd` (`HH:mm:ss`) and `available`.
+
+## Building the appointment date
+
+The next step ([Appointments](/docs/php/v0.x/appointments/) / [Payments](/docs/php/v0.x/payments/))
+expects `appointmentDate` as `"Y-m-d H:i"` — the **date key + `slotStart` with the
+seconds dropped**:
+
+```php
+foreach ($schedule as $date => $slots) {
+    if ($slots === []) {
+        continue;
+    }
+    $slot = $slots[0];
+    $appointmentDate = $date . ' ' . substr($slot['slotStart'], 0, 5); // "2026-06-20 14:30"
+
+    $client->appointments->reserveInterview(8282, $appointmentDate);
+    break;
+}
+```
+
+> The server resolves the actual slot from `doctorId` + `appointmentDate`; you do
+> not send `slotId` when reserving or paying.

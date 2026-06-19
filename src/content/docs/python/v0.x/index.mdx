@@ -1,0 +1,151 @@
+---
+title: Overview
+description: Install the Bulutklinik Python SDK and make your first authenticated API call with the sync or async client.
+order: 0
+---
+
+# Python SDK
+
+The official Bulutklinik API SDK for Python. It is hand-written, fully typed
+(`py.typed`), and ships **both a synchronous and an asynchronous client** built on
+[httpx](https://www.python-httpx.org/). Python 3.9+.
+
+It covers the patient flow end to end: **authentication, doctor search, availability
+slots, appointments, payments (3-D Secure) and health measures** — 6 service groups
+over 27 endpoints.
+
+- **Package:** [`bulutklinik-sdk`](https://pypi.org/project/bulutklinik-sdk/) on PyPI
+- **Source:** [github.com/bulutklinik/python-sdk](https://github.com/bulutklinik/python-sdk)
+- **Spec version:** 0.1.0 (API v3)
+
+## Install
+
+```bash
+pip install bulutklinik-sdk
+```
+
+The import name is `bulutklinik`:
+
+```python
+from bulutklinik import BulutklinikClient, AsyncBulutklinikClient
+```
+
+## Quick start (sync)
+
+Construct the client once and reuse it; each service group is exposed as an
+attribute. The client is a context manager, so `with` closes the underlying
+connection pool for you.
+
+```python
+from bulutklinik import BulutklinikClient
+
+with BulutklinikClient(
+    environment="production",  # "production" | "test" | "local"
+    client_id="your-oauth-client-id",
+    client_secret="your-oauth-client-secret",
+) as client:
+    # 1) Log in — tokens are stored automatically.
+    login = client.auth.connect(
+        "patient@example.com",
+        "•••••••",
+        "email",
+    )
+    if login.two_factor_required:
+        client.auth.connect_with_two_factor("123456", login.two_factor_response)
+
+    # 2) Search for a doctor.
+    result = client.doctors.search(
+        search_params={"withFreeText": "kardiyoloji"},
+        order_params=["slot"],
+        current_page=1,
+    )
+    doctor_id = result["foundDoctors"][0]["doctor_id"]
+
+    # 3) Read the doctor's free slots.
+    schedule = client.slots.schedule(doctor_id, "interview")
+
+    # 4) Reserve an online appointment ("YYYY-MM-DD HH:mm").
+    client.appointments.reserve_interview(doctor_id, "2026-06-20 14:30")
+```
+
+Every data method returns the unwrapped `data` payload from the response envelope
+(see [Errors & responses](/docs/python/v0.x/errors/)) — typically a `dict`, `list`
+or `None`; failures raise a typed exception.
+
+## Quick start (async)
+
+`AsyncBulutklinikClient` exposes the **same service groups and method names**, but
+every method is awaitable. Use it as an async context manager.
+
+```python
+import asyncio
+from bulutklinik import AsyncBulutklinikClient
+
+async def main() -> None:
+    async with AsyncBulutklinikClient(
+        environment="production",
+        client_id="your-oauth-client-id",
+        client_secret="your-oauth-client-secret",
+    ) as client:
+        await client.auth.connect("patient@example.com", "•••••••", "email")
+        result = await client.doctors.search(search_params={"withFreeText": "kardiyoloji"})
+        doctor_id = result["foundDoctors"][0]["doctor_id"]
+        schedule = await client.slots.schedule(doctor_id, "interview")
+        await client.appointments.reserve_interview(doctor_id, "2026-06-20 14:30")
+
+asyncio.run(main())
+```
+
+The pages that follow show sync examples; the async equivalent is the same call
+prefixed with `await`.
+
+## Client configuration
+
+Both `BulutklinikClient(...)` and `AsyncBulutklinikClient(...)` take the same
+**keyword-only** options:
+
+| Option          | Type                          | Default                  | Purpose |
+|-----------------|-------------------------------|--------------------------|---------|
+| `environment`   | `Environment \| str`          | `"production"`           | Named base-URL preset (`"production"` / `"test"` / `"local"`). Ignored when `base_url` is set. |
+| `base_url`      | `str \| None`                 | `None`                   | Explicit base URL; overrides `environment`. |
+| `lang`          | `str`                         | `"tr"`                   | `lang` header sent with every request (`tr`, `en`, `de`, `az`). |
+| `client_id`     | `str \| None`                 | `None`                   | OAuth client id (used by `connect` and token refresh). |
+| `client_secret` | `str \| None`                 | `None`                   | OAuth client secret. |
+| `partner_token` | `str \| None`                 | `None`                   | Bearer token for the partner (`teusan`) measures endpoint. |
+| `token_store`   | `TokenStore \| None`          | `InMemoryTokenStore()`   | Pluggable token persistence (see [Authentication](/docs/python/v0.x/authentication/)). |
+| `timeout`       | `float`                       | `30.0`                   | Per-request timeout in **seconds**. |
+| `transport`     | `httpx.BaseTransport \| None` (async: `httpx.AsyncBaseTransport \| None`) | `None` | Injectable httpx transport (useful for testing / proxies). |
+
+`environment` accepts either the plain string or the exported `Environment` enum
+(`Environment.PRODUCTION`, `Environment.TEST`, `Environment.LOCAL`).
+
+### Environments
+
+| Environment  | Base URL |
+|--------------|----------|
+| `production` | `https://api.bulutklinik.com/api/v3` |
+| `test`       | `https://apitest.bulutklinik.com/api/v3` |
+| `local`      | `https://api-bulutklinik.test/api/v3` |
+
+The active store is reachable as `client.token_store`. The sync client closes via
+`client.close()` (or `with`); the async client via `await client.aclose()` (or
+`async with`).
+
+## Service groups
+
+| Attribute              | Covered in |
+|------------------------|------------|
+| `client.auth`          | [Authentication](/docs/python/v0.x/authentication/) |
+| `client.doctors`       | [Doctors](/docs/python/v0.x/doctors/) |
+| `client.slots`         | [Slots](/docs/python/v0.x/slots/) |
+| `client.appointments`  | [Appointments](/docs/python/v0.x/appointments/) |
+| `client.payments`      | [Payments](/docs/python/v0.x/payments/) |
+| `client.measures`      | [Measures](/docs/python/v0.x/measures/) |
+
+## Typing
+
+The package ships `py.typed`, so mypy / Pyright resolve the public API out of the
+box. Request inputs are plain keyword arguments and primitive containers
+(`dict[str, Any]`, `list[...]`); `data` payloads are returned as parsed JSON
+(`dict` / `list` / `None`). The exported `LoginResult` dataclass and the full
+[error hierarchy](/docs/python/v0.x/errors/) are typed.

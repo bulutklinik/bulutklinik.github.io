@@ -1,0 +1,133 @@
+---
+title: Errors & responses
+description: The response envelope, the sentinel errors and error types, and how the SDK maps failures.
+order: 7
+---
+
+# Errors & responses
+
+## The response envelope
+
+Every API response is a JSON envelope. The SDK unwraps it for you — on success it
+returns the `data` payload as a `json.RawMessage`; on failure it returns a typed error.
+
+```jsonc
+{
+  "resultType": 0,            // state code (see below)
+  "errorType": "validation",  // string label OR numeric code
+  "errorMessage": "…",        // human-readable, localized via `lang`
+  "successMessage": "…",
+  "data": { /* payload */ }   // what the SDK returns on success
+}
+```
+
+A call is successful only when the HTTP status is 2xx **and** `resultType == 0`.
+The `resultType` state codes:
+
+| Value | Name      | Meaning |
+|:-----:|-----------|---------|
+| `0`   | `Success` | Return `data`. |
+| `1`   | `Error`   | Return an `*APIError` (matching `ErrAPI` or a more specific sentinel). |
+| `2`   | `Logout`  | Session revoked — token store cleared, error matches `ErrAuthentication`. |
+| `3`   | `Update`  | Client/app too old — `*APIError` matching `ErrAPI`. |
+| `4`   | `Refresh` | Token expired — triggers silent refresh + retry. |
+
+> `errorType` is **polymorphic**: some endpoints return a string label
+> (`"validation"`), others a numeric code. The SDK stores it as `any` and only
+> treats it as a refinement hint when it is a string.
+
+## Error model
+
+The SDK returns two concrete error types, plus a set of sentinel errors for use with
+`errors.Is`. There is no class hierarchy — Go composes behaviour with sentinels.
+
+`*TransportError` is returned when no usable HTTP response was received (network
+failure, timeout, DNS or TLS error). It matches `ErrTransport` and carries:
+
+| Field     | Type     | Notes |
+|-----------|----------|-------|
+| `Message` | `string` | Human-readable description. |
+| `Err`     | `error`  | The wrapped underlying error (also reachable via `errors.Unwrap`). |
+
+`*APIError` is returned when an HTTP response was received but the call was not
+successful. It carries:
+
+| Field        | Type              | Notes |
+|--------------|-------------------|-------|
+| `Message`    | `string`          | `errorMessage` from the envelope (or `"request failed"`). |
+| `HTTPStatus` | `int`             | HTTP status code. |
+| `ResultType` | `*int`            | Envelope `resultType` (may be `nil`). |
+| `ErrorType`  | `any`             | Raw envelope value — a string label or a numeric code. |
+| `Data`       | `json.RawMessage` | Raw `data` payload from the failed response. |
+| `Method`     | `string`          | Originating HTTP method. |
+| `Path`       | `string`          | Originating request path. |
+| `RetryAfter` | `*int`            | Seconds from the `Retry-After` header, when present (`nil` otherwise). |
+
+The sentinel errors:
+
+| Sentinel            | Matches |
+|---------------------|---------|
+| `ErrTransport`      | Any `*TransportError` (no HTTP response). |
+| `ErrAPI`            | **Every** `*APIError` (the base — all API failures match it). |
+| `ErrValidation`     | 422, or `errorType == "validation"`. |
+| `ErrAuthentication` | 401 / `resultType 2` logout / failed refresh. |
+| `ErrAuthorization`  | 403. |
+| `ErrNotFound`       | 404. |
+| `ErrRateLimit`      | 429 — `RetryAfter` carries the `Retry-After` seconds when present. |
+
+Every `*APIError` matches both `ErrAPI` and its specific kind (e.g. an
+`ErrNotFound` failure also matches `ErrAPI`).
+
+## Idiomatic error handling
+
+Match the failure with `errors.Is` against a sentinel, then pull the typed error out
+with `errors.As` to read its fields:
+
+```go
+import (
+	"errors"
+	"fmt"
+
+	bk "github.com/bulutklinik/go-sdk"
+)
+
+_, err := client.Payments.Pay(ctx, in)
+switch {
+case errors.Is(err, bk.ErrRateLimit):
+	var apiErr *bk.APIError
+	errors.As(err, &apiErr)
+	if apiErr.RetryAfter != nil {
+		fmt.Printf("throttled — retry after %ds\n", *apiErr.RetryAfter)
+	}
+case errors.Is(err, bk.ErrValidation):
+	var apiErr *bk.APIError
+	errors.As(err, &apiErr)
+	fmt.Println("invalid request", string(apiErr.Data))
+case errors.Is(err, bk.ErrAuthentication):
+	fmt.Println("session expired — re-login required")
+case errors.Is(err, bk.ErrTransport):
+	var tErr *bk.TransportError
+	errors.As(err, &tErr)
+	fmt.Println("network problem", tErr.Err)
+case errors.Is(err, bk.ErrAPI):
+	var apiErr *bk.APIError
+	errors.As(err, &apiErr)
+	fmt.Printf("API error %d on %s %s\n", apiErr.HTTPStatus, apiErr.Method, apiErr.Path)
+case err != nil:
+	// some other error
+}
+```
+
+## Mapping precedence
+
+The SDK picks the most specific sentinel kind for an `*APIError` in this order:
+
+1. `resultType == 2` (logout) → `ErrAuthentication`
+2. string `errorType == "validation"` (or HTTP 422) → `ErrValidation`
+3. HTTP status: 401 → `ErrAuthentication`, 403 → `ErrAuthorization`,
+   404 → `ErrNotFound`, 429 → `ErrRateLimit`
+4. otherwise (including numeric `errorType`, or 2xx with `resultType != 0`) → `ErrAPI`
+
+Because `errorType` may be numeric, the SDK guards before string-matching it — and
+so should any code that inspects `apiErr.ErrorType` (use a type assertion to `string`
+before comparing).

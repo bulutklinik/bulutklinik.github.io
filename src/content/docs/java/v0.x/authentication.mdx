@@ -1,0 +1,205 @@
+---
+title: Authentication
+description: Log in, handle two-factor challenges, refresh and revoke tokens, and plug in custom token storage.
+order: 1
+---
+
+# Authentication
+
+Bulutklinik uses OAuth2 (Laravel Passport). The token grant happens server-side
+inside `connect` — the SDK never calls `oauth/token` directly. Access tokens last
+~30 days and refresh tokens ~130 days.
+
+`client.auth` exposes five methods: `connect`, `connectWithTwoFactor`, `register`,
+`refresh` and `disconnect`. Tokens obtained by `connect` / `connectWithTwoFactor` /
+`register` are stored automatically.
+
+| Method                                                          | Endpoint |
+|-----------------------------------------------------------------|----------|
+| `connect(apiUserName, apiUserPassword, loginMode)`              | `POST /general/connectApi` |
+| `connectWithTwoFactor(smsVerificationCode, response)`           | `POST /general/connectApiWithTwoFactor` |
+| `register(RegisterInput)`                                       | `POST /patients/addNewPatient` |
+| `refresh()`                                                     | `POST /general/refreshApi` |
+| `disconnect()`                                                  | `POST /general/disconnectApi` |
+
+## `auth.connect`
+
+`POST /general/connectApi` · public (no bearer token). Returns a `LoginResult`.
+
+```java
+LoginResult login = client.auth.connect("patient@example.com", "•••••••", "email");
+```
+
+There are two overloads:
+
+```java
+// Uses the client's configured clientId / clientSecret.
+LoginResult connect(String apiUserName, String apiUserPassword, String loginMode);
+
+// Override credentials and/or supply withPhoneNumber (pass null to skip any).
+LoginResult connect(String apiUserName, String apiUserPassword, String loginMode,
+                    String clientId, String clientSecret, String withPhoneNumber);
+```
+
+`connect` parameters:
+
+| Parameter         | Type     | Required | Notes |
+|-------------------|----------|:--------:|-------|
+| `apiUserName`     | `String` | ✓        | Identifier per `loginMode` (email / TC / phone / user id). |
+| `apiUserPassword` | `String` | ✓*       | Required except in `social` / `afterRegister` modes. |
+| `loginMode`       | `String` | ✓        | `"email"` \| `"identity"` \| `"phone"` \| `"user_id"` \| `"social"` \| `"afterRegister"`. |
+| `clientId`        | `String` | —        | Defaults to the client's configured client id when `null`. |
+| `clientSecret`    | `String` | —        | Defaults to the client's configured secret when `null`. |
+| `withPhoneNumber` | `String` | —        | Some installs require it in `phone` mode. |
+
+The result is a `LoginResult` record — **always check `twoFactorRequired()`**:
+
+```java
+LoginResult login = client.auth.connect(apiUserName, apiUserPassword, "email");
+
+if (login.twoFactorRequired()) {
+    // login.twoFactorResponse() is an encrypted blob — pass it on with the SMS code.
+    client.auth.connectWithTwoFactor(smsCode, login.twoFactorResponse());
+} else {
+    // Logged in. Tokens are already stored.
+}
+```
+
+When SMS two-factor is enabled the response carries no access token; instead it
+returns an encrypted blob, surfaced as `login.twoFactorResponse()`, to forward to
+`connectWithTwoFactor`. `LoginResult` is a record with two components:
+
+| Component                | Type      | Notes |
+|--------------------------|-----------|-------|
+| `twoFactorRequired()`    | `boolean` | `true` when SMS 2FA must be completed. |
+| `twoFactorResponse()`    | `String`  | The encrypted challenge blob (`null` when not required). |
+
+## `auth.connectWithTwoFactor`
+
+`POST /general/connectApiWithTwoFactor` · public. Returns `void`.
+
+```java
+client.auth.connectWithTwoFactor("123456", login.twoFactorResponse());
+```
+
+Tokens are minted during `connect` and returned (and stored) here. The SDK sends
+only `smsVerificationCode` + `response`.
+
+## `auth.register`
+
+`POST /patients/addNewPatient` · public (guarded by SMS verification + throttle).
+Takes a `RegisterInput` record and returns `void`.
+
+```java
+client.auth.register(new RegisterInput(
+        "Ada",                       // name
+        "Lovelace",                  // surname
+        "+90 555 111 22 33",         // apiUserName (same +CC value as phoneNumber)
+        "+90 555 111 22 33",         // phoneNumber
+        "•••••••",                   // password
+        "123456",                    // smsVerificationCode
+        smsVerifyBlob,               // response (from the prior SMS-verification step)
+        1,                           // acceptUserAgreement
+        null,                        // clientId (defaults to configured)
+        null));                      // clientSecret (defaults to configured)
+```
+
+`RegisterInput` components (in order):
+
+| Component             | Type     | Required | Notes |
+|-----------------------|----------|:--------:|-------|
+| `name`                | `String` | ✓        | |
+| `surname`             | `String` | ✓        | |
+| `apiUserName`         | `String` | ✓        | Should equal `phoneNumber` (the `+CC` form); becomes the `afterRegister` login username. |
+| `phoneNumber`         | `String` | ✓        | Must start with `+` and a country code (e.g. `+90 555 111 22 33`); bare digits are rejected. |
+| `password`            | `String` | ✓        | |
+| `smsVerificationCode` | `String` | ✓        | The code from the prior SMS-verify step. |
+| `response`            | `String` | ✓        | The encrypted blob from the prior SMS-verify step. |
+| `acceptUserAgreement` | `int`    | —        | Defaults to `1` when `0` is passed. |
+| `clientId`            | `String` | —        | Defaults to the configured client id when `null`. |
+| `clientSecret`        | `String` | —        | Defaults to the configured secret when `null`. |
+
+> The SMS-verification step that produces the `response` blob is **not** part of
+> the SDK surface; obtain `response` + `smsVerificationCode` beforehand. On success
+> the patient is created and auto-logged-in (`afterRegister`), so tokens are stored.
+
+## Silent auto-refresh & retry
+
+Every protected call carries the stored access token. If the API answers `401`
+(or `resultType 4`, the refresh signal) and a refresh token is available, the SDK:
+
+1. calls the refresh endpoint with the stored refresh token + client credentials,
+2. persists the rotated tokens,
+3. retries the original request **once**.
+
+The retry is bounded to one attempt, and concurrent 401s share a single in-flight
+refresh — the SDK gates refresh on a mutex (`synchronized`), so multiple threads do
+not stampede the refresh endpoint. If the refresh fails — or the API returns
+`resultType 2` (logout) — the token store is cleared and an
+[`AuthenticationException`](/docs/java/v0.x/errors/) is thrown.
+
+You rarely need to call `refresh` yourself, but it is available:
+
+```java
+client.auth.refresh(); // POST /general/refreshApi
+```
+
+> `refresh` requires `clientId` / `clientSecret` on the client and a stored refresh
+> token; otherwise it throws an `AuthenticationException`.
+
+## `auth.disconnect`
+
+`POST /general/disconnectApi` · bearer. Revokes the tokens server-side, then clears
+the local token store (in a `finally` block, even if the network call fails).
+
+```java
+client.auth.disconnect();
+```
+
+## Token store
+
+Tokens live in a pluggable `TokenStore`. The default is `InMemoryTokenStore` (lost
+on process exit). Implement the interface to persist to a file, database or secure
+storage. A `null` return means "no token":
+
+```java
+public interface TokenStore {
+    String getAccessToken();
+    String getRefreshToken();
+    void setTokens(String accessToken, String refreshToken);
+    void clear();
+}
+```
+
+```java
+import com.bulutklinik.sdk.BulutklinikClient;
+import com.bulutklinik.sdk.TokenStore;
+
+TokenStore fileStore = new TokenStore() {
+    @Override public String getAccessToken()  { return readToken("access"); }
+    @Override public String getRefreshToken() { return readToken("refresh"); }
+    @Override public void setTokens(String access, String refresh) { writeTokens(access, refresh); }
+    @Override public void clear() { clearTokens(); }
+};
+
+BulutklinikClient client = BulutklinikClient.builder()
+        .credentials(clientId, clientSecret)
+        .tokenStore(fileStore)
+        .build();
+```
+
+The bundled `InMemoryTokenStore` can be seeded with existing tokens — handy for
+resuming a session:
+
+```java
+import com.bulutklinik.sdk.InMemoryTokenStore;
+
+InMemoryTokenStore store = new InMemoryTokenStore(accessToken, refreshToken);
+
+BulutklinikClient client = BulutklinikClient.builder()
+        .credentials(clientId, clientSecret)
+        .tokenStore(store)
+        .build();
+```
+
+The active store is also reachable as `client.tokenStore()`.

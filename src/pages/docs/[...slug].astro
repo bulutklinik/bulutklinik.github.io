@@ -1,0 +1,49 @@
+---
+import { getCollection, render } from "astro:content";
+import DocsLayout from "../../layouts/DocsLayout.astro";
+import { DOC_VERSION, LANGS, LANG_BY_KEY, langKeyOf, normalizeSlug } from "../../lib/docs";
+
+export async function getStaticPaths() {
+  const entries = await getCollection("docs");
+  return entries.map((entry) => ({
+    params: { slug: normalizeSlug(entry.id) },
+    props: { entry, entries },
+  }));
+}
+
+const { entry, entries } = Astro.props;
+const { Content, headings } = await render(entry);
+
+const langKey = langKeyOf(entry.id);
+const langMeta = LANG_BY_KEY[langKey];
+
+// Sidebar: every page for this language, ordered.
+const nav = entries
+  .filter((e) => langKeyOf(e.id) === langKey)
+  .sort((a, b) => (a.data.order ?? 0) - (b.data.order ?? 0))
+  .map((e) => ({
+    href: `/docs/${normalizeSlug(e.id)}/`,
+    label: e.data.title,
+    active: e.id === entry.id,
+  }));
+
+// Language switcher: jump to each language's overview page (if it has docs).
+const haveLang = new Set(entries.map((e) => langKeyOf(e.id)));
+const langSwitch = LANGS.filter((l) => haveLang.has(l.key)).map((l) => ({
+  href: `/docs/${l.key}/${DOC_VERSION}/`,
+  label: l.name,
+  active: l.key === langKey,
+}));
+---
+
+<DocsLayout
+  title={entry.data.title}
+  description={entry.data.description}
+  langName={langMeta?.name ?? langKey}
+  repo={langMeta?.repo ?? "https://github.com/bulutklinik"}
+  nav={nav}
+  langSwitch={langSwitch}
+  headings={headings}
+>
+  <Content />
+</DocsLayout>

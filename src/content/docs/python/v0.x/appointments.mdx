@@ -1,0 +1,72 @@
+---
+title: Appointments
+description: Reserve online interviews, create physical appointments, and cancel by event id.
+order: 4
+---
+
+# Appointments
+
+`client.appointments` books and cancels appointments. All methods require a bearer
+token. The server resolves the slot from `doctor_id` + `appointment_date` — there is
+no `slotId` in the request.
+
+| Method | Endpoint |
+|--------|----------|
+| `reserve_interview(doctor_id, appointment_date, appointment_type="interview")` | `POST /patients/addInterviewDateReservation` |
+| `add_physical(doctor_id, appointment_date)` | `POST /patients/addNewAppointment` |
+| `cancel(event_id)` | `DELETE /patients/deleteUserAppointment/{event_id}` |
+
+> Async: each method is awaitable on `AsyncBulutklinikClient` under the same name.
+
+## `reserve_interview(...)`
+
+Reserve an online (interview) slot. Returns `None` on success (the API responds
+`resultType 0`, `data: null`).
+
+```python
+client.appointments.reserve_interview(
+    8282,                  # doctor_id
+    "2026-06-20 14:30",    # appointment_date, "YYYY-MM-DD HH:mm", today..+21
+)
+```
+
+`reserve_interview` parameters:
+
+| Parameter          | Type          | Required | Default        |
+|--------------------|---------------|:--------:|----------------|
+| `doctor_id`        | `int \| str`  | ✓        | —              |
+| `appointment_date` | `str`         | ✓        | —              |
+| `appointment_type` | `str`         | —        | `"interview"`  |
+
+`appointment_type` is `"interview"` or `"appointment"`. A successful reservation
+returns `None`; conflicts and validation failures raise a typed
+[error](/docs/python/v0.x/errors/).
+
+## `add_physical(...)`
+
+Create an in-person (physical) appointment. No `appointment_type`.
+
+```python
+client.appointments.add_physical(
+    8282,                  # doctor_id
+    "2026-06-20 14:30",    # appointment_date, "YYYY-MM-DD HH:mm"
+)
+```
+
+`add_physical` parameters:
+
+| Parameter          | Type          | Required |
+|--------------------|---------------|:--------:|
+| `doctor_id`        | `int \| str`  | ✓        |
+| `appointment_date` | `str`         | ✓        |
+
+## `cancel(event_id)`
+
+Cancel an appointment by its event id (`cln_events.id`).
+
+```python
+client.appointments.cancel(event_id)
+```
+
+> Cancellation can be rejected (server-side) for insurance appointments, once the
+> cancel window has passed, or if the event is not found — these surface as a typed error.

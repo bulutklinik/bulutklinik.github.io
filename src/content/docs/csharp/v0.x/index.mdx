@@ -1,0 +1,140 @@
+---
+title: Overview
+description: Install the Bulutklinik C# / .NET SDK and make your first authenticated API call.
+order: 0
+---
+
+# C# / .NET SDK
+
+The official Bulutklinik API SDK for .NET. It is hand-written, async-first and
+built on `System.Text.Json` over the platform `HttpClient`. It targets `net8.0`,
+is nullable-enabled, and the client is thread-safe — construct it once and reuse it.
+
+It covers the patient flow end to end: **authentication, doctor search, availability
+slots, appointments, payments (3-D Secure) and health measures** — 6 service groups
+over 27 endpoints.
+
+- **Package:** [`Bulutklinik.Sdk`](https://www.nuget.org/packages/Bulutklinik.Sdk) on NuGet
+- **Source:** [github.com/bulutklinik/csharp-sdk](https://github.com/bulutklinik/csharp-sdk)
+- **Spec version:** 0.1.0 (API v3)
+
+## Install
+
+```bash
+dotnet add package Bulutklinik.Sdk
+```
+
+Every public method is asynchronous, returns a `Task` (or `Task<T>`), and accepts an
+optional `CancellationToken`. Data methods return a `System.Text.Json.JsonElement` —
+the unwrapped `data` payload from the response envelope.
+
+## Quick start
+
+Construct the client once and reuse it; each service group is exposed as a property.
+
+```csharp
+using Bulutklinik.Sdk;
+
+var client = new BulutklinikClient(new BulutklinikClientOptions
+{
+    Environment = BulutklinikEnvironment.Production, // Production | Test | Local
+    ClientId = "your-oauth-client-id",
+    ClientSecret = "your-oauth-client-secret",
+});
+
+// 1) Log in — tokens are stored automatically.
+var login = await client.Auth.ConnectAsync(
+    "patient@example.com",
+    "•••••••",
+    "email");
+
+if (login.TwoFactorRequired)
+{
+    await client.Auth.ConnectWithTwoFactorAsync("123456", login.TwoFactorResponse!);
+}
+
+// 2) Search for a doctor.
+var result = await client.Doctors.SearchAsync(new SearchInput
+{
+    SearchParams = new Dictionary<string, object?> { ["withFreeText"] = "kardiyoloji" },
+    OrderParams = new[] { "slot" },
+    CurrentPage = 1,
+});
+int doctorId = result.GetProperty("foundDoctors")[0].GetProperty("doctor_id").GetInt32();
+
+// 3) Read the doctor's free slots.
+var schedule = await client.Slots.ScheduleAsync(doctorId, "interview");
+
+// 4) Reserve an online appointment ("yyyy-MM-dd HH:mm").
+await client.Appointments.ReserveInterviewAsync(doctorId, "2026-06-20 14:30");
+```
+
+Every data method returns the unwrapped `data` payload as a `JsonElement`
+(see [Errors & responses](/docs/csharp/v0.x/errors/)); failures throw a typed exception.
+
+## Client configuration
+
+`new BulutklinikClient(BulutklinikClientOptions? options = null)` reads these
+`BulutklinikClientOptions` properties:
+
+| Option         | Type                       | Default                      | Purpose |
+|----------------|----------------------------|------------------------------|---------|
+| `Environment`  | `BulutklinikEnvironment`   | `BulutklinikEnvironment.Production` | Named base-URL preset. Ignored when `BaseUrl` is set. |
+| `BaseUrl`      | `string?`                  | `null`                       | Explicit base URL; overrides `Environment`. |
+| `Lang`         | `string`                   | `"tr"`                       | `lang` header sent with every request (`tr`, `en`, `de`, `az`). |
+| `ClientId`     | `string?`                  | `null`                       | OAuth client id (used by `ConnectAsync` and token refresh). |
+| `ClientSecret` | `string?`                  | `null`                       | OAuth client secret. |
+| `PartnerToken` | `string?`                  | `null`                       | Bearer token for the partner (`teusan`) measures endpoint. |
+| `TokenStore`   | `ITokenStore?`             | `InMemoryTokenStore`         | Pluggable token persistence (see [Authentication](/docs/csharp/v0.x/authentication/)). |
+| `HttpClient`   | `HttpClient?`              | a new `HttpClient`           | Injectable transport (reuse a pooled instance, set proxies, etc.). |
+| `Timeout`      | `TimeSpan`                 | `TimeSpan.FromSeconds(30)`   | Per-request timeout. Applied only to the SDK-created `HttpClient`. |
+
+When you pass your own `HttpClient`, the SDK uses it as-is — set its `Timeout`
+yourself, since `Timeout` above is only applied to the client the SDK creates.
+The active token store is reachable as `client.TokenStore`.
+
+### Environments
+
+| Environment                          | Base URL |
+|--------------------------------------|----------|
+| `BulutklinikEnvironment.Production`  | `https://api.bulutklinik.com/api/v3` |
+| `BulutklinikEnvironment.Test`        | `https://apitest.bulutklinik.com/api/v3` |
+| `BulutklinikEnvironment.Local`       | `https://api-bulutklinik.test/api/v3` |
+
+`BulutklinikEnvironment` is a plain enum with `Production`, `Test` and `Local`
+members; the default is `Production`.
+
+## Service groups
+
+| Property               | Covered in |
+|------------------------|------------|
+| `client.Auth`          | [Authentication](/docs/csharp/v0.x/authentication/) |
+| `client.Doctors`       | [Doctors](/docs/csharp/v0.x/doctors/) |
+| `client.Slots`         | [Slots](/docs/csharp/v0.x/slots/) |
+| `client.Appointments`  | [Appointments](/docs/csharp/v0.x/appointments/) |
+| `client.Payments`      | [Payments](/docs/csharp/v0.x/payments/) |
+| `client.Measures`      | [Measures](/docs/csharp/v0.x/measures/) |
+
+## Working with JsonElement
+
+Data methods return `System.Text.Json.JsonElement`, so you read fields with the
+`GetProperty` / `TryGetProperty` and `Get…` accessors:
+
+```csharp
+var result = await client.Doctors.SearchAsync(new SearchInput
+{
+    SearchParams = new Dictionary<string, object?> { ["withFreeText"] = "kardiyoloji" },
+});
+
+int count = result.GetProperty("foundDoctorsCount").GetInt32();
+foreach (var doctor in result.GetProperty("foundDoctors").EnumerateArray())
+{
+    int id = doctor.GetProperty("doctor_id").GetInt32();
+    string name = doctor.GetProperty("name").GetString()!;
+}
+```
+
+If you prefer strong types, deserialize the `JsonElement` into your own model with
+`element.Deserialize<T>()`. Request inputs are typed throughout —
+`BulutklinikClientOptions`, `SearchInput`, `PaymentInput`, `CardInfo`,
+`RegisterInput` and the full [exception hierarchy](/docs/csharp/v0.x/errors/).

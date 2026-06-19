@@ -1,0 +1,139 @@
+---
+title: Payments
+description: Validate discount codes, manage saved cards, and start a 3-D Secure appointment payment.
+order: 5
+---
+
+# Payments
+
+`client.payments` handles discount checks, saved cards and the appointment payment
+entrypoint. All methods require a bearer token. The amount is always computed
+**server-side** — you never send a price.
+
+| Method | Endpoint |
+|--------|----------|
+| `check_discount_code(check_type, discount_code, *, doctor_id=None, order_id=None, special_service_id=None, program_slug=None)` | `POST /patients/checkDiscountCode` |
+| `get_cards()` | `GET /payments/getCards` |
+| `save_card(card_holder, card_number, card_exp_month, card_exp_year, card_cvv)` | `POST /payments/saveCard` |
+| `pay(doctor_id, appointment_date, is_3d, terms_accept, *, appointment_type="interview", card_info=None, card_id=None, save_card=0, discount_code="", case_detail=None)` | `POST /payments/interviewPayment` |
+| `delete_card(card_id)` | `DELETE /payments/deleteCard/{card_id}` |
+
+> Async: each method is awaitable on `AsyncBulutklinikClient` under the same name.
+
+## `check_discount_code(...)`
+
+Validate a discount code before paying. `check_type` and `discount_code` are
+positional; the rest are keyword-only. (Note: this endpoint lives under the
+`patients` prefix, not `payments`.)
+
+```python
+discount = client.payments.check_discount_code(
+    "appointment",   # check_type
+    "WELCOME10",     # discount_code
+    doctor_id=8282,
+)
+```
+
+`check_discount_code` parameters:
+
+| Parameter            | Type                  | Required | Notes |
+|----------------------|-----------------------|:--------:|-------|
+| `check_type`         | `str`                 | ✓        | `"question"` \| `"appointment"` \| `"lab"` \| `"special"` \| `"physicallyAppointment"` \| `"tmcLab"` \| `"program"`. |
+| `discount_code`      | `str`                 | ✓        | The code to validate. |
+| `doctor_id`          | `int \| str \| None`  | ✓*       | Required except `lab` / `tmcLab` / `program`. |
+| `order_id`           | `int \| str \| None`  | —        | Per check type. |
+| `special_service_id` | `int \| str \| None`  | —        | For `special`. |
+| `program_slug`       | `str \| None`         | —        | For `program`. |
+
+A valid code returns `{"discount_code": ..., "discount_title": ..., "discount_id": ..., "prices": ...}`.
+
+## Saved cards
+
+```python
+result = client.payments.get_cards()
+cards = result["cards"]
+# cards: [{"id": ..., "card_holder_name": ..., "card_number": ... (masked), "card_type": ..., "created_at": ...}]
+
+client.payments.save_card(
+    "Ada Lovelace",        # card_holder
+    "4111111111111111",    # card_number
+    "12",                  # card_exp_month ("m")
+    "2030",                # card_exp_year ("Y")
+    "123",                 # card_cvv
+)
+
+client.payments.delete_card(card_id)  # card_id from get_cards()
+```
+
+`save_card` takes five positional string parameters (`card_holder`, `card_number`,
+`card_exp_month`, `card_exp_year`, `card_cvv`) — all required.
+
+## `pay(...)`
+
+Start an appointment payment. The first four parameters are positional; the rest
+keyword-only. Provide **either** a new `card_info` (all-or-none) **or** a saved
+`card_id`. `pay` returns the unwrapped `data` dict.
+
+```python
+result = client.payments.pay(
+    8282,                  # doctor_id
+    "2026-06-20 14:30",    # appointment_date, "YYYY-MM-DD HH:mm"
+    True,                  # is_3d
+    True,                  # terms_accept
+    appointment_type="interview",  # "interview" | "appointment"
+    card_id=saved_card_id,          # …or card_info={...}
+    save_card=0,                    # 1 tokenizes a new card
+    discount_code="WELCOME10",      # optional
+)
+
+if result.get("payment3DUrl"):
+    # Open this URL in a browser to complete 3-D Secure.
+    print(result["payment3DUrl"])
+```
+
+`pay` parameters:
+
+| Parameter          | Type                       | Required | Default        | Notes |
+|--------------------|----------------------------|:--------:|----------------|-------|
+| `doctor_id`        | `int \| str`               | ✓        | —              | |
+| `appointment_date` | `str` (`YYYY-MM-DD HH:mm`) | ✓        | —              | |
+| `is_3d`            | `bool`                     | ✓        | —              | `True` returns a `payment3DUrl`. |
+| `terms_accept`     | `bool`                     | ✓        | —              | Must be accepted. |
+| `appointment_type` | `str`                      | —        | `"interview"`  | `"interview"` or `"appointment"`. |
+| `card_info`        | `dict[str, str] \| None`   | —*       | `None`         | A new card (`cardHolder`, `cardNumber`, `cardExpMonth`, `cardExpYear`, `cardCvv`)… |
+| `card_id`          | `int \| str \| None`       | —*       | `None`         | …or a saved card id. |
+| `save_card`        | `int`                      | —        | `0`            | `1` tokenizes the card. |
+| `discount_code`    | `str`                      | —        | `""`           | Optional. |
+| `case_detail`      | `str \| None`              | —        | `None`         | Opaque encrypted blob, passed through verbatim. |
+
+When you pass `card_info`, it is the API's camelCase shape — a dict with
+`cardHolder`, `cardNumber`, `cardExpMonth`, `cardExpYear` and `cardCvv` (all-or-none):
+
+```python
+result = client.payments.pay(
+    8282,
+    "2026-06-20 14:30",
+    True,
+    True,
+    card_info={
+        "cardHolder": "Ada Lovelace",
+        "cardNumber": "4111111111111111",
+        "cardExpMonth": "12",
+        "cardExpYear": "2030",
+        "cardCvv": "123",
+    },
+    save_card=1,
+)
+```
+
+## 3-D Secure
+
+On a 3DS flow (`is_3d=True`) the result carries `payment3DUrl` — a **browser URL**
+to open. The SDK returns it verbatim and does **not** follow, open or parse it.
+3DS completion (the "provizyon kapatma" / capture) happens browser ↔ bank ↔ server
+via a callback, which is outside the SDK's scope. When `is_3d=False`, `data` is the
+inline-completed order result with no `payment3DUrl`.
+
+> `pay` is rate-limited to 20 requests/hour/IP. On `test`, it may return 404 if the
+> POS isn't configured for the company; the SDK validates the request shape and the
+> `payment3DUrl` return, not the bank capture.

@@ -1,0 +1,78 @@
+---
+title: Slots
+description: Read a doctor's real-time availability and build the appointment date for the next step.
+order: 3
+---
+
+# Slots
+
+`client.Slots` exposes a single method, `Schedule`, which returns a doctor's free
+slots from the materialized availability table. Requires a bearer token and returns
+the unwrapped `data` as a `json.RawMessage`.
+
+| Method | Endpoint |
+|--------|----------|
+| `Schedule(ctx, in)` | `POST /patients/doctorScheduler` |
+
+## `Schedule(ctx, in)`
+
+```go
+raw, err := client.Slots.Schedule(ctx, bk.ScheduleInput{
+	DoctorID: 8282,
+	ListType: "interview", // "interview" → online slots; "appointment" → physical
+})
+```
+
+`ScheduleInput`:
+
+| Field          | Type     | Required | Notes |
+|----------------|----------|:--------:|-------|
+| `DoctorID`     | `any`    | ✓        | From a doctor search result (an `int` or `string`). |
+| `ListType`     | `string` | ✓        | `"interview"` → online slots; anything else → physical. |
+| `ScheduleDate` | `string` | —        | `Y-m-d`, today..+21. When empty, the window is paged. |
+| `ScheduleStep` | `any`    | —        | Window size (days). Default `7` when `nil`. |
+| `SchedulePage` | `any`    | —        | Window page. Default `1` when `nil`. |
+
+You can either request a single day with `ScheduleDate`, or page across a rolling
+window with `ScheduleStep` + `SchedulePage`.
+
+## The result
+
+`Schedule` returns a **date-keyed map** (`Y-m-d` → array of slots). Empty days are `[]`.
+Decode it into a typed map:
+
+```go
+type Slot struct {
+	SlotID    int    `json:"slotId"`
+	SlotStart string `json:"slotStart"` // "HH:mm:ss"
+	SlotEnd   string `json:"slotEnd"`   // "HH:mm:ss"
+	Available bool   `json:"available"`
+}
+
+var schedule map[string][]Slot
+_ = json.Unmarshal(raw, &schedule)
+// schedule["2026-06-20"] == []Slot{ {SlotID: 1, SlotStart: "14:30:00", ...} }
+// schedule["2026-06-21"] == []Slot{} (empty day)
+```
+
+Each slot has `slotId`, `slotStart` / `slotEnd` (`HH:mm:ss`) and `available`.
+
+## Building the appointment date
+
+The next step ([Appointments](/docs/go/v0.x/appointments/) / [Payments](/docs/go/v0.x/payments/))
+expects `appointmentDate` as `"Y-m-d H:i"` — the **date key + `slotStart` with the
+seconds dropped**:
+
+```go
+for date, slots := range schedule {
+	if len(slots) == 0 {
+		continue
+	}
+	appointmentDate := date + " " + slots[0].SlotStart[:5] // "2026-06-20 14:30"
+	_, err := client.Appointments.ReserveInterview(ctx, 8282, appointmentDate, "")
+	break
+}
+```
+
+> The server resolves the actual slot from `DoctorID` + `appointmentDate`; you do
+> not send `slotId` when reserving or paying.

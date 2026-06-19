@@ -1,0 +1,109 @@
+---
+title: Doctors
+description: List branches and locations, run quick or filtered doctor searches, and fetch doctor details.
+order: 2
+---
+
+# Doctors
+
+`$client->doctors` covers discovery: reference lists (branches, locations), two
+search modes, and the full doctor detail. All methods require a logged-in client
+(bearer token) and return PHP arrays.
+
+| Method                                       | Endpoint |
+|----------------------------------------------|----------|
+| `branches()`                                 | `GET /patients/allBranches` |
+| `locations()`                                | `GET /patients/allLocations` |
+| `quickSearch(searchText, listType?, location?)` | `POST /patients/quickSearch` |
+| `search(searchParams?, orderParams?, otherParams?, currentPage?, perPageLimit?)` | `POST /patients/filteredSearch` |
+| `detail(id, corporate?)`                     | `GET /patients/doctorDetail/{id}/{corporate?}` |
+
+## `branches()` / `locations()`
+
+Reference lists for building search filters.
+
+```php
+$branches = $client->doctors->branches();   // array
+$locations = $client->doctors->locations(); // array
+```
+
+## `quickSearch(...)`
+
+Typeahead-style search across branches, doctors, companies, treatments and blogs.
+
+```php
+$result = $client->doctors->quickSearch(
+    searchText: 'kardiyo',   // 3–100 chars
+    listType: 'interview',   // "interview" | "appointment" | null
+);
+```
+
+`quickSearch` parameters:
+
+| Parameter    | Type      | Required |
+|--------------|-----------|:--------:|
+| `searchText` | `string` (3–100) | ✓ |
+| `listType`   | `?string` (`interview` \| `appointment` \| `null`) | — |
+| `location`   | `?string` | — |
+
+The result groups matches into `searchedBranches`, `searchedDoctors`,
+`searchedCompanies`, `searchedGivenTreatments`, `searchedBlogs` and `queryText`.
+
+> On the `test` environment `quickSearch` may return a 404 because the search
+> driver (Elasticsearch) is not provisioned there. Use `search` (below) — it is the
+> production search path and works in `test`.
+
+## `search(...)`
+
+Filtered, paginated doctor search. This is the primary search method.
+
+```php
+$result = $client->doctors->search(
+    searchParams: [
+        'withFreeText' => 'kardiyoloji',
+        'withLocationId' => 34,
+    ],
+    orderParams: ['slot'],            // "name" | "point" | "slot" | "order"
+    otherParams: ['isInterviewable'], // "isKizilay" | "isQuestionable" | "isInterviewable" | "isAppointmentable"
+    currentPage: 1,                   // >= 1
+    perPageLimit: 20,                 // 10–100, default 20
+);
+
+$count = $result['foundDoctorsCount'];
+$doctors = $result['foundDoctors'];
+```
+
+`search` parameters:
+
+| Parameter      | Type                      | Required | Default |
+|----------------|---------------------------|:--------:|---------|
+| `searchParams` | `array<string, mixed>`    | —        | `[]` |
+| `orderParams`  | `list<string>`            | —        | `[]` |
+| `otherParams`  | `list<string>`            | —        | `[]` |
+| `currentPage`  | `int` (≥ 1)               | —        | `1` |
+| `perPageLimit` | `int` (10–100)            | —        | `20` |
+
+`searchParams` keys (all optional): `withFreeText`, `withDoctorName`,
+`withBranchName`, `withBranchId` (`-1` excludes psychology/diet), `withLocationName`,
+`withLocationId`, `withCompanyName`, `withCompanyId`, `withGivenTreatments`,
+`withExpertyId`, `withInstitutionId`, `withNearestSlotDayRange`.
+
+The result is `['foundDoctorsCount' => …, 'foundDoctors' => [...]]`, where each
+doctor includes `doctor_id`, `name`, `surname`, `branch_name`, `star_rate`,
+`nearest_slot`, `isInterviewable`, `isAppointmentable`, `url`, `user_image` and
+more. The `doctor_id` feeds [Slots](/docs/php/v0.x/slots/) and
+[Appointments](/docs/php/v0.x/appointments/).
+
+## `detail(id, corporate?)`
+
+Full doctor profile. `id` is the `doctor_id` from a search result; `corporate` is optional.
+
+```php
+$detail = $client->doctors->detail(8282);
+// or scoped to a corporate/clinic context:
+$detail2 = $client->doctors->detail(8282, $corporateId);
+```
+
+`id` and `corporate` are typed `int|string` (`corporate` is `int|string|null`). The
+payload includes `doctorGeneralInfo` (prices, session length, branch), education,
+languages, reviews, videos, special services and related clinics.

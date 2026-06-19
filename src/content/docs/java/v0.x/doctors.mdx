@@ -1,0 +1,109 @@
+---
+title: Doctors
+description: List branches and locations, run quick or filtered doctor searches, and fetch doctor details.
+order: 2
+---
+
+# Doctors
+
+`client.doctors` covers discovery: reference lists (branches, locations), two search
+modes, and the full doctor detail. All methods require a logged-in client (bearer
+token) and return a Jackson `JsonNode`.
+
+| Method                            | Endpoint |
+|-----------------------------------|----------|
+| `branches()`                      | `GET /patients/allBranches` |
+| `locations()`                     | `GET /patients/allLocations` |
+| `quickSearch(searchText, listType, location)` | `POST /patients/quickSearch` |
+| `search(SearchInput)`             | `POST /patients/filteredSearch` |
+| `detail(id, corporate)`           | `GET /patients/doctorDetail/{id}/{corporate?}` |
+
+## `branches()` / `locations()`
+
+Reference lists for building search filters.
+
+```java
+JsonNode branches  = client.doctors.branches();   // array of branches
+JsonNode locations = client.doctors.locations();  // array of locations
+```
+
+## `quickSearch(searchText, listType, location)`
+
+Typeahead-style search across branches, doctors, companies, treatments and blogs.
+`listType` and `location` may be `null`.
+
+```java
+JsonNode result = client.doctors.quickSearch(
+        "kardiyo",      // searchText, 3–100 chars
+        "interview",     // listType: "interview" | "appointment" | null
+        null);           // location
+```
+
+`quickSearch` parameters:
+
+| Parameter    | Type     | Required | Notes |
+|--------------|----------|:--------:|-------|
+| `searchText` | `String` | ✓        | 3–100 chars. |
+| `listType`   | `String` | —        | `"interview"` \| `"appointment"` \| `null`. |
+| `location`   | `String` | —        | `null` to omit. |
+
+The result groups matches into `searchedBranches`, `searchedDoctors`,
+`searchedCompanies`, `searchedGivenTreatments`, `searchedBlogs` and `queryText`.
+
+> On the `test` environment `quickSearch` may return a 404 because the search
+> driver (Elasticsearch) is not provisioned there. Use `search` (below) — it is the
+> production search path and works in `test`.
+
+## `search(SearchInput)`
+
+Filtered, paginated doctor search. This is the primary search method.
+
+```java
+import java.util.List;
+import java.util.Map;
+
+JsonNode result = client.doctors.search(new SearchInput(
+        Map.of("withFreeText", "kardiyoloji", "withLocationId", 34), // searchParams
+        List.of("slot"),                                              // orderParams
+        List.of("isInterviewable"),                                   // otherParams
+        1,                                                            // currentPage
+        20));                                                         // perPageLimit
+
+int count = result.get("foundDoctorsCount").asInt();
+JsonNode doctors = result.get("foundDoctors");
+```
+
+`SearchInput` components (in order):
+
+| Component      | Type                  | Required | Default | Notes |
+|----------------|-----------------------|:--------:|---------|-------|
+| `searchParams` | `Map<String, Object>` | —        | `{}`    | `null` defaults to an empty map. |
+| `orderParams`  | `List<String>`        | —        | `[]`    | `"name"` \| `"point"` \| `"slot"` \| `"order"`. |
+| `otherParams`  | `List<String>`        | —        | `[]`    | `"isKizilay"` \| `"isQuestionable"` \| `"isInterviewable"` \| `"isAppointmentable"`. |
+| `currentPage`  | `int`                 | ✓        | `1`     | Defaults to `1` when `<= 0`. |
+| `perPageLimit` | `int`                 | —        | `20`    | 10–100; defaults to `20` when `<= 0`. |
+
+`searchParams` keys (all optional): `withFreeText`, `withDoctorName`,
+`withBranchName`, `withBranchId` (`-1` excludes psychology/diet), `withLocationName`,
+`withLocationId`, `withCompanyName`, `withCompanyId`, `withGivenTreatments`,
+`withExpertyId`, `withInstitutionId`, `withNearestSlotDayRange`.
+
+The result is `{ foundDoctorsCount, foundDoctors }`, where each doctor includes
+`doctor_id`, `name`, `surname`, `branch_name`, `star_rate`, `nearest_slot`,
+`isInterviewable`, `isAppointmentable`, `url`, `user_image` and more. The
+`doctor_id` feeds [Slots](/docs/java/v0.x/slots/) and [Appointments](/docs/java/v0.x/appointments/).
+
+## `detail(id, corporate)`
+
+Full doctor profile. `id` is the `doctor_id` from a search result; `corporate` is
+optional — pass `null` to omit that segment. Both parameters are typed as `Object`,
+so an `int`, `Integer` or `String` id all work.
+
+```java
+JsonNode detail  = client.doctors.detail(8282, null);
+// or scoped to a corporate/clinic context:
+JsonNode detail2 = client.doctors.detail(8282, corporateId);
+```
+
+The payload includes `doctorGeneralInfo` (prices, session length, branch),
+education, languages, reviews, videos, special services and related clinics.

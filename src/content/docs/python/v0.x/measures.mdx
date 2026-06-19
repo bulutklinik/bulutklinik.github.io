@@ -1,0 +1,132 @@
+---
+title: Measures
+description: Submit and read patient health measurements — CRUD, latest values, history lists and graphs.
+order: 6
+---
+
+# Measures
+
+`client.measures` records and reads patient health measurements (tension, glucose,
+weight, …). Patient endpoints require a bearer token; the partner endpoint uses the
+configured partner token. Records are written to the authenticated patient.
+
+| Method | Endpoint |
+|--------|----------|
+| `add_list(records)` | `POST /patients/addNewUserMeasures` |
+| `add(measure_type, fields)` | `POST /patients/addNewUserMeasures/{measure_type}` |
+| `update(measure_type, fields)` | `PUT /patients/updateUserMeasures/{measure_type}` |
+| `delete(measure_type, measure_id)` | `DELETE /patients/deleteUserMeasures/{measure_type}` |
+| `last()` | `GET /patients/measuresList` |
+| `list(measure_type, page, glucose_type=None)` | `GET /patients/userMeasuresList/{measure_type}/{page}/{glucose_type?}` |
+| `graph(measure_type, period, page, glucose_type=None)` | `GET /patients/userMeasuresGraph/{measure_type}/{period}/{page}/{glucose_type?}` |
+| `partner_health_information(*, identity=None, phone_number=None, data)` | `POST /outher/healthInformation` |
+
+> Async: each method is awaitable on `AsyncBulutklinikClient` under the same name.
+
+Every measurement record also requires `date_time` as `"YYYY-MM-DD HH:mm"`.
+
+## `add_list(records)` — primary entrypoint
+
+Submit one or many measurements (of any types) in a single transaction. `records` is
+a `list[dict[str, Any]]`.
+
+```python
+client.measures.add_list([
+    {"type": "tension", "hypertension": 120, "hypotension": 80, "date_time": "2026-06-19 09:00"},
+    {"type": "glucose", "glucose": 95, "glucose_type": 0, "date_time": "2026-06-19 09:00"},
+    {"type": "weight", "weight": 72.5, "date_time": "2026-06-19 09:00"},
+])
+```
+
+## `add` / `update` / `delete`
+
+Single-type writes. The measure type is the first positional argument; the record
+fields are a dict.
+
+```python
+# Add one measurement of a type.
+client.measures.add("pulse", {"pulse": 68, "date_time": "2026-06-19 09:00"})
+
+# Update an existing record (id goes in the fields dict).
+client.measures.update("pulse", {"id": 1234, "pulse": 70, "date_time": "2026-06-19 09:00"})
+
+# Delete a record (id required).
+client.measures.delete("pulse", 1234)
+```
+
+| Method | Parameters |
+|--------|------------|
+| `add(measure_type, fields)` | `measure_type: str`, `fields: dict[str, Any]` (type fields + `date_time`) |
+| `update(measure_type, fields)` | `measure_type: str`, `fields: dict[str, Any]` (must include `id`) |
+| `delete(measure_type, measure_id)` | `measure_type: str`, `measure_id: int \| str` |
+
+## Reading measurements
+
+```python
+# Latest value of every type.
+latest = client.measures.last()
+
+# Paginated history for one type (page is 1-based).
+history = client.measures.list("weight", 1)
+
+# Glucose splits by glucose_type (0 = fasting, 1 = postprandial).
+glucose = client.measures.list("glucose", 1, 0)
+
+# Grouped graph data. period: 1=day, 2=week, 3=month, 4=year.
+graph = client.measures.graph("tension", 3, 1)
+```
+
+| Method | Parameters |
+|--------|------------|
+| `last()` | — |
+| `list(measure_type, page, glucose_type=None)` | `measure_type: str`, `page: int \| str`, `glucose_type: int \| None` (only for glucose) |
+| `graph(measure_type, period, page, glucose_type=None)` | `measure_type: str`, `period: int` (1=day, 2=week, 3=month, 4=year), `page: int \| str`, `glucose_type: int \| None` |
+
+`last()` returns the most recent of each type. Tension splits into
+`hypertension` / `hypotension` and glucose into `hunger_glucose` /
+`postprandial_glucose`, each with a `*Date`.
+
+## Measure types
+
+Each record carries a `type` plus that type's fields (and `date_time`):
+
+| `type`    | Fields |
+|-----------|--------|
+| `tension` | `hypertension` (systolic), `hypotension` (diastolic) |
+| `glucose` | `glucose`, `glucose_type` (0 = fasting, 1 = postprandial) |
+| `pulse`   | `pulse` |
+| `fever`   | `fever` |
+| `weight`  | `weight` (BMI auto-computed) |
+| `length`  | `length` (BMI auto-computed) |
+| `waist`   | `waist` |
+| `hip`     | `hip` |
+| `fat`     | `fat` |
+| `muscle`  | `muscle` |
+| `calorie` | `calorie` |
+| `step`    | `step` |
+| `sleep`   | `sleep` (hours; stored to `sleep_time`) |
+
+Values are numeric; `tension` / `pulse` are 1–10 digits, `glucose` is `0–99999.99`
+and requires `glucose_type`, weights/lengths are `0–99999.99`.
+
+## Partner submission
+
+`partner_health_information` uses the partner (`teusan`) token configured via
+`partner_token`, not the patient access token. All parameters are **keyword-only**;
+`data` is a `list[dict[str, Any]]`.
+
+```python
+partner_client = BulutklinikClient(partner_token="…")
+
+partner_client.measures.partner_health_information(
+    identity="12345678901",
+    phone_number="+90 555 111 22 33",
+    data=[
+        {"type": "tension", "hypertension": 120, "hypotension": 80, "date_time": "2026-06-19 09:00"},
+    ],
+)
+```
+
+> Known API behaviour: the partner endpoint has a server-side bug where `identity`
+> is nulled during validation, so matching falls back to `phone_number`. The SDK
+> sends the correct contract (`identity` + `phone_number`); send both.

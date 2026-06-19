@@ -1,0 +1,105 @@
+---
+title: Errors & responses
+description: The response envelope, the typed exception hierarchy, and how the SDK maps failures to exceptions.
+order: 7
+---
+
+# Errors & responses
+
+## The response envelope
+
+Every API response is a JSON envelope. The SDK unwraps it for you — on success it
+returns the `data` payload directly; on failure it raises a typed exception.
+
+```python
+# {
+#   "resultType": 0,            # state code (see below)
+#   "errorType": "validation",  # string label OR numeric code
+#   "errorMessage": "…",        # human-readable, localized via `lang`
+#   "successMessage": "…",
+#   "data": { ... }             # what the SDK returns on success
+# }
+```
+
+A call is successful only when the HTTP status is 2xx **and** `resultType == 0`.
+The `resultType` state codes:
+
+| Value | Name      | Meaning |
+|:-----:|-----------|---------|
+| `0`   | `Success` | Return `data`. |
+| `1`   | `Error`   | Raise `ApiError` (or a subtype). |
+| `2`   | `Logout`  | Session revoked — token store cleared, `AuthenticationError`. |
+| `3`   | `Update`  | Client/app too old — `ApiError`. |
+| `4`   | `Refresh` | Token expired — triggers silent refresh + retry. |
+
+> `errorType` is **polymorphic**: some endpoints return a string label
+> (`"validation"`), others a numeric code. The SDK treats it as a refinement hint
+> only when it is a string.
+
+## Exception hierarchy
+
+All errors subclass `BulutklinikError`:
+
+```
+BulutklinikError                  (base — all SDK errors)
+├── TransportError                (network failure, timeout, DNS, TLS — no HTTP response)
+└── ApiError                      (an HTTP response that wasn't a success)
+    ├── ValidationError           (422, or errorType "validation")
+    ├── AuthenticationError       (401 / logout / failed refresh)
+    ├── AuthorizationError        (403)
+    ├── NotFoundError             (404)
+    └── RateLimitError            (429 — carries retry_after)
+```
+
+Each `ApiError` carries `http_status`, `result_type`, `error_type`, `data`, `method`
+and `path` for debugging. `RateLimitError` adds `retry_after` (seconds, when the
+`Retry-After` header is present; otherwise `None`).
+
+| Attribute     | Type                  | Notes |
+|---------------|-----------------------|-------|
+| `http_status` | `int`                 | The HTTP status code. |
+| `result_type` | `int \| None`         | The envelope `resultType`, when numeric. |
+| `error_type`  | `str \| int \| None`  | The envelope `errorType` (string label or numeric code). |
+| `data`        | `Any`                 | The raw `data` from the envelope. |
+| `method`      | `str \| None`         | The request HTTP method. |
+| `path`        | `str \| None`         | The request path. |
+| `retry_after` | `int \| None`         | Seconds to wait (on `RateLimitError`). |
+
+```python
+from bulutklinik import (
+    ApiError,
+    AuthenticationError,
+    RateLimitError,
+    ValidationError,
+    TransportError,
+)
+
+try:
+    client.payments.pay(8282, "2026-06-20 14:30", True, True, card_id=5)
+except RateLimitError as exc:
+    print(f"throttled — retry after {exc.retry_after}s")
+except ValidationError as exc:
+    print("invalid request", exc.data)
+except AuthenticationError:
+    print("session expired — re-login required")
+except TransportError as exc:
+    print("network problem", exc)
+except ApiError as exc:
+    print(f"API error {exc.http_status} on {exc.method} {exc.path}")
+```
+
+The same exceptions are raised by the async client; wrap `await` calls in the same
+`try` / `except`.
+
+## Mapping precedence
+
+The SDK picks the most specific exception type in this order:
+
+1. `result_type == 2` (logout) → `AuthenticationError`
+2. string `error_type == "validation"` (case-insensitive) or HTTP 422 → `ValidationError`
+3. HTTP status: 401 → `AuthenticationError`, 403 → `AuthorizationError`,
+   404 → `NotFoundError`, 429 → `RateLimitError`
+4. otherwise (including numeric `error_type`, or 2xx with `result_type != 0`) → `ApiError`
+
+Because `error_type` may be numeric, the SDK guards before string-matching it — and
+so should any code that inspects `exc.error_type`.

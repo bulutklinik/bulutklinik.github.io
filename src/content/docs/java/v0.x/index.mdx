@@ -1,0 +1,127 @@
+---
+title: Overview
+description: Install the Bulutklinik Java SDK and make your first authenticated API call.
+order: 0
+---
+
+# Java SDK
+
+The official Bulutklinik API SDK for Java. It is hand-written and built on the JDK's
+own `java.net.http.HttpClient` plus Jackson — no heavyweight HTTP stack. It targets
+**Java 17+** and is thread-safe: build one client and reuse it everywhere.
+
+It covers the patient flow end to end: **authentication, doctor search, availability
+slots, appointments, payments (3-D Secure) and health measures** — 6 service groups
+over 27 endpoints.
+
+- **Package:** [`com.bulutklinik:sdk`](https://central.sonatype.com/artifact/com.bulutklinik/sdk) on Maven Central
+- **Source:** [github.com/bulutklinik/java-sdk](https://github.com/bulutklinik/java-sdk)
+- **Spec version:** 0.1.0 (API v3)
+
+## Install
+
+Maven:
+
+```xml
+<dependency>
+  <groupId>com.bulutklinik</groupId>
+  <artifactId>sdk</artifactId>
+  <version>0.1.0</version>
+</dependency>
+```
+
+Gradle (Kotlin DSL):
+
+```java
+implementation("com.bulutklinik:sdk:0.1.0")
+```
+
+The SDK pulls in Jackson (`jackson-databind`) transitively; the HTTP client is the
+JDK built-in, so there is nothing else to add.
+
+## Quick start
+
+Build the client once with the builder and reuse it; each service group is exposed
+as a `public final` field.
+
+```java
+import com.bulutklinik.sdk.*;
+import com.fasterxml.jackson.databind.JsonNode;
+import java.util.List;
+import java.util.Map;
+
+BulutklinikClient client = BulutklinikClient.builder()
+        .environment(Environment.PRODUCTION) // PRODUCTION | TEST | LOCAL
+        .credentials("your-oauth-client-id", "your-oauth-client-secret")
+        .build();
+
+// 1) Log in — tokens are stored automatically.
+LoginResult login = client.auth.connect("patient@example.com", "•••••••", "email");
+if (login.twoFactorRequired()) {
+    client.auth.connectWithTwoFactor("123456", login.twoFactorResponse());
+}
+
+// 2) Search for a doctor — data methods return a Jackson JsonNode.
+JsonNode result = client.doctors.search(new SearchInput(
+        Map.of("withFreeText", "kardiyoloji"),
+        List.of("slot"),
+        List.of(),
+        1,
+        20));
+int doctorId = result.get("foundDoctors").get(0).get("doctor_id").asInt();
+
+// 3) Read the doctor's free slots.
+JsonNode schedule = client.slots.schedule(doctorId, "interview");
+
+// 4) Reserve an online appointment ("yyyy-MM-dd HH:mm").
+client.appointments.reserveInterview(doctorId, "2026-06-20 14:30");
+```
+
+Every data method returns the unwrapped `data` payload from the response envelope
+as a Jackson `JsonNode` (see [Errors & responses](/docs/java/v0.x/errors/)); failures
+throw an unchecked typed exception. When `data` is absent the SDK returns a JSON
+null node rather than a Java `null`.
+
+## Client configuration
+
+`BulutklinikClient.builder()` exposes these fluent methods:
+
+| Builder method                      | Type             | Default                  | Purpose |
+|-------------------------------------|------------------|--------------------------|---------|
+| `.environment(...)`                 | `Environment`    | `Environment.PRODUCTION` | Named base-URL preset. Ignored when `baseUrl` is set. |
+| `.baseUrl(...)`                     | `String`         | —                        | Explicit base URL; overrides `environment`. Trailing slashes are trimmed. |
+| `.lang(...)`                        | `String`         | `"tr"`                   | `lang` header sent with every request (`tr` \| `en` \| `de` \| `az`). |
+| `.credentials(...)`                 | `String, String` | —                        | OAuth client id + secret (used by `connect` and token refresh). |
+| `.partnerToken(...)`                | `String`         | —                        | Bearer token for the partner (`teusan`) measures endpoint. |
+| `.tokenStore(...)`                  | `TokenStore`     | `InMemoryTokenStore`     | Pluggable token persistence (see [Authentication](/docs/java/v0.x/authentication/)). |
+| `.httpClient(...)`                  | `HttpClient`     | JDK default              | Injectable `java.net.http.HttpClient`. |
+| `.timeout(...)`                     | `Duration`       | `Duration.ofSeconds(30)` | Per-request and connect timeout. |
+
+### Environments
+
+| Environment            | Base URL |
+|------------------------|----------|
+| `Environment.PRODUCTION` | `https://api.bulutklinik.com/api/v3` |
+| `Environment.TEST`       | `https://apitest.bulutklinik.com/api/v3` |
+| `Environment.LOCAL`      | `https://api-bulutklinik.test/api/v3` |
+
+Each preset URL is reachable directly via `Environment.PRODUCTION.baseUrl()`.
+
+## Service groups
+
+| Field                  | Covered in |
+|------------------------|------------|
+| `client.auth`          | [Authentication](/docs/java/v0.x/authentication/) |
+| `client.doctors`       | [Doctors](/docs/java/v0.x/doctors/) |
+| `client.slots`         | [Slots](/docs/java/v0.x/slots/) |
+| `client.appointments`  | [Appointments](/docs/java/v0.x/appointments/) |
+| `client.payments`      | [Payments](/docs/java/v0.x/payments/) |
+| `client.measures`      | [Measures](/docs/java/v0.x/measures/) |
+
+## Types
+
+Request inputs are Java `record` types — `SearchInput`, `PaymentInput`, `CardInfo`,
+`RegisterInput` — with positional components in a fixed order (documented on each
+service page). Responses come back as Jackson `JsonNode`, which you navigate with
+`get("field")` and the `asInt()` / `asText()` / `asBoolean()` accessors. All
+exceptions are unchecked and extend `BulutklinikException`.

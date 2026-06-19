@@ -1,0 +1,69 @@
+---
+title: Slots
+description: Read a doctor's real-time availability and build the appointment date for the next step.
+order: 3
+---
+
+# Slots
+
+`client.slots` exposes a single method, `schedule`, which returns a doctor's free
+slots from the materialized availability table. Requires a bearer token.
+
+| Method            | Endpoint |
+|-------------------|----------|
+| `schedule(input)` | `POST /patients/doctorScheduler` |
+
+## `schedule(input)`
+
+```ts
+const schedule = await client.slots.schedule({
+  doctorId: 8282,
+  listType: "interview", // "interview" → online slots; "appointment" → physical
+});
+```
+
+`SchedulerInput`:
+
+| Field          | Type                              | Required | Notes |
+|----------------|-----------------------------------|:--------:|-------|
+| `doctorId`     | `number \| string`                | ✓        | From a doctor search result. |
+| `listType`     | `"interview" \| "appointment"`    | ✓        | `interview` → online slots; anything else → physical. |
+| `scheduleDate` | `string \| null`                  | —        | `Y-m-d`, today..+21. When omitted, the window is paged. |
+| `scheduleStep` | `number \| string`                | —        | Window size (days). Default `"7"`. |
+| `schedulePage` | `number \| string`                | —        | Window page. Default `"1"`. |
+
+You can either request a single day with `scheduleDate`, or page across a rolling
+window with `scheduleStep` + `schedulePage`.
+
+## The result
+
+`schedule` returns a **date-keyed map** (`Y-m-d` → array of slots). Empty days are `[]`.
+
+```ts
+// {
+//   "2026-06-20": [
+//     { slotId: 1, slotStart: "14:30:00", slotEnd: "14:50:00", available: true },
+//     ...
+//   ],
+//   "2026-06-21": []
+// }
+```
+
+Each slot has `slotId`, `slotStart` / `slotEnd` (`HH:mm:ss`) and `available`.
+
+## Building the appointment date
+
+The next step ([Appointments](/docs/js/v0.x/appointments/) / [Payments](/docs/js/v0.x/payments/))
+expects `appointmentDate` as `"Y-m-d H:i"` — the **date key + `slotStart` with the
+seconds dropped**:
+
+```ts
+const [date, slots] = Object.entries(schedule).find(([, s]) => s.length > 0)!;
+const slot = slots[0];
+const appointmentDate = `${date} ${slot.slotStart.slice(0, 5)}`; // "2026-06-20 14:30"
+
+await client.appointments.reserveInterview({ doctorId: 8282, appointmentDate });
+```
+
+> The server resolves the actual slot from `doctorId` + `appointmentDate`; you do
+> not send `slotId` when reserving or paying.

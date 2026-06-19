@@ -1,0 +1,113 @@
+---
+title: Doctors
+description: List branches and locations, run quick or filtered doctor searches, and fetch doctor details.
+order: 2
+---
+
+# Doctors
+
+`client.Doctors` covers discovery: reference lists (branches, locations), two search
+modes, and the full doctor detail. All methods require a logged-in client (bearer token)
+and return the unwrapped `data` as a `json.RawMessage`.
+
+| Method | Endpoint |
+|--------|----------|
+| `Branches(ctx)` | `GET /patients/allBranches` |
+| `Locations(ctx)` | `GET /patients/allLocations` |
+| `QuickSearch(ctx, searchText, listType, location)` | `POST /patients/quickSearch` |
+| `Search(ctx, in)` | `POST /patients/filteredSearch` |
+| `Detail(ctx, id, corporate)` | `GET /patients/doctorDetail/{id}/{corporate?}` |
+
+## `Branches` / `Locations`
+
+Reference lists for building search filters.
+
+```go
+branches, err := client.Doctors.Branches(ctx)   // json.RawMessage
+locations, err := client.Doctors.Locations(ctx) // json.RawMessage
+```
+
+## `QuickSearch(ctx, searchText, listType, location)`
+
+Typeahead-style search across branches, doctors, companies, treatments and blogs.
+The arguments are positional; pass empty strings for the optional ones (they
+serialize to JSON `null`).
+
+```go
+raw, err := client.Doctors.QuickSearch(ctx, "kardiyo", "interview", "")
+```
+
+| Argument     | Type     | Required | Notes |
+|--------------|----------|:--------:|-------|
+| `searchText` | `string` | ✓        | 3–100 chars. |
+| `listType`   | `string` | —        | `"interview"`, `"appointment"` or `""`. |
+| `location`   | `string` | —        | `""` omits it. |
+
+The result groups matches into `searchedBranches`, `searchedDoctors`,
+`searchedCompanies`, `searchedGivenTreatments`, `searchedBlogs` and `queryText`.
+
+> On the `Test` environment `QuickSearch` may return a 404 because the search
+> driver (Elasticsearch) is not provisioned there. Use `Search` (below) — it is the
+> production search path and works in `test`.
+
+## `Search(ctx, in)`
+
+Filtered, paginated doctor search. This is the primary search method.
+
+```go
+raw, err := client.Doctors.Search(ctx, bk.SearchInput{
+	SearchParams: map[string]any{
+		"withFreeText":   "kardiyoloji",
+		"withLocationId": 34,
+	},
+	OrderParams:  []string{"slot"},            // "name" | "point" | "slot" | "order"
+	OtherParams:  []string{"isInterviewable"}, // "isKizilay" | "isQuestionable" | "isInterviewable" | "isAppointmentable"
+	CurrentPage:  1,                            // >= 1
+	PerPageLimit: 20,                           // 10–100, default 20
+})
+
+var result struct {
+	FoundDoctorsCount int `json:"foundDoctorsCount"`
+	FoundDoctors      []struct {
+		DoctorID int    `json:"doctor_id"`
+		Name     string `json:"name"`
+		Surname  string `json:"surname"`
+	} `json:"foundDoctors"`
+}
+_ = json.Unmarshal(raw, &result)
+```
+
+`SearchInput`:
+
+| Field          | Type             | Required | Default |
+|----------------|------------------|:--------:|---------|
+| `SearchParams` | `map[string]any` | —        | `{}` |
+| `OrderParams`  | `[]string`       | —        | `[]` |
+| `OtherParams`  | `[]string`       | —        | `[]` |
+| `CurrentPage`  | `int`            | —        | `1` (when zero) |
+| `PerPageLimit` | `int` (10–100)   | —        | `20` (when zero) |
+
+`SearchParams` keys (all optional): `withFreeText`, `withDoctorName`,
+`withBranchName`, `withBranchId` (`-1` excludes psychology/diet), `withLocationName`,
+`withLocationId`, `withCompanyName`, `withCompanyId`, `withGivenTreatments`,
+`withExpertyId`, `withInstitutionId`, `withNearestSlotDayRange`.
+
+The result is `{ foundDoctorsCount, foundDoctors }`, where each doctor includes
+`doctor_id`, `name`, `surname`, `branch_name`, `star_rate`, `nearest_slot`,
+`isInterviewable`, `isAppointmentable`, `url`, `user_image` and more. The
+`doctor_id` feeds [Slots](/docs/go/v0.x/slots/) and [Appointments](/docs/go/v0.x/appointments/).
+
+## `Detail(ctx, id, corporate)`
+
+Full doctor profile. `id` is the `doctor_id` from a search result; `corporate` is
+optional — pass `nil` to omit the segment. Both are `any` so an `int` or `string`
+works.
+
+```go
+detail, err := client.Doctors.Detail(ctx, 8282, nil)
+// or scoped to a corporate/clinic context:
+detail2, err := client.Doctors.Detail(ctx, 8282, corporateID)
+```
+
+The payload includes `doctorGeneralInfo` (prices, session length, branch),
+education, languages, reviews, videos, special services and related clinics.

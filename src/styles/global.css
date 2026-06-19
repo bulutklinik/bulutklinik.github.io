@@ -24,3 +24,134 @@
 html {
   scroll-behavior: smooth;
 }
+
+/* ---- Documentation prose ---------------------------------------------- */
+/* Hand-rolled typography for MDX content (keeps deps minimal; no @tailwindcss/typography). */
+.doc-prose {
+  color: #334155; /* slate-700 */
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+.doc-prose > :first-child {
+  margin-top: 0;
+}
+.doc-prose h1 {
+  font-size: 2rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+  margin: 0 0 0.5rem;
+  line-height: 1.15;
+}
+.doc-prose h2 {
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #0f172a;
+  margin: 2.5rem 0 0.75rem;
+  padding-top: 0.5rem;
+  scroll-margin-top: 5rem;
+}
+.doc-prose h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #1e293b;
+  margin: 1.75rem 0 0.5rem;
+  scroll-margin-top: 5rem;
+}
+.doc-prose p {
+  margin: 0.9rem 0;
+}
+.doc-prose a {
+  color: #1a9d99; /* brand-600 */
+  text-decoration: none;
+  font-weight: 500;
+}
+.doc-prose a:hover {
+  color: #167e7d; /* brand-700 */
+  text-decoration: underline;
+}
+.doc-prose ul,
+.doc-prose ol {
+  margin: 0.9rem 0;
+  padding-left: 1.4rem;
+}
+.doc-prose li {
+  margin: 0.35rem 0;
+}
+.doc-prose ul {
+  list-style: disc;
+}
+.doc-prose ol {
+  list-style: decimal;
+}
+.doc-prose strong {
+  color: #0f172a;
+  font-weight: 600;
+}
+/* Inline code (Shiki only styles fenced blocks). */
+.doc-prose :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: #f1f5f9; /* slate-100 */
+  color: #0f766e; /* teal-700-ish */
+  padding: 0.15em 0.4em;
+  border-radius: 0.35rem;
+  border: 1px solid #e2e8f0;
+}
+/* Shiki code blocks. */
+.doc-prose pre {
+  margin: 1.25rem 0;
+  padding: 1.1rem 1.25rem;
+  border-radius: 0.85rem;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  border: 1px solid #1e293b;
+}
+.doc-prose pre code {
+  font-family: var(--font-mono);
+  background: transparent;
+  padding: 0;
+  border: 0;
+}
+.doc-prose blockquote {
+  margin: 1.25rem 0;
+  padding: 0.75rem 1.1rem;
+  border-left: 3px solid #45eaaa; /* brand-400 */
+  background: #effdf8; /* brand-50 */
+  border-radius: 0 0.5rem 0.5rem 0;
+  color: #475569;
+}
+.doc-prose blockquote p {
+  margin: 0.35rem 0;
+}
+.doc-prose table {
+  width: 100%;
+  margin: 1.25rem 0;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+  display: block;
+  overflow-x: auto;
+}
+.doc-prose th,
+.doc-prose td {
+  text-align: left;
+  padding: 0.55rem 0.8rem;
+  border: 1px solid #e2e8f0;
+  vertical-align: top;
+}
+.doc-prose th {
+  background: #f8fafc;
+  font-weight: 600;
+  color: #0f172a;
+  white-space: nowrap;
+}
+.doc-prose td code {
+  white-space: nowrap;
+}
+.doc-prose hr {
+  margin: 2.5rem 0;
+  border: 0;
+  border-top: 1px solid #e2e8f0;
+}

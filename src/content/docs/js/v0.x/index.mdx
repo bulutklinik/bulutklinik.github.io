@@ -1,0 +1,125 @@
+---
+title: Overview
+description: Install the Bulutklinik JavaScript / TypeScript SDK and make your first authenticated API call.
+order: 0
+---
+
+# JavaScript / TypeScript SDK
+
+The official Bulutklinik API SDK for JavaScript and TypeScript. It is hand-written,
+fully typed, and runs anywhere modern `fetch` is available — Node.js (18+), Deno,
+Bun, edge runtimes and the browser.
+
+It covers the patient flow end to end: **authentication, doctor search, availability
+slots, appointments, payments (3-D Secure) and health measures** — 6 service groups
+over 27 endpoints.
+
+- **Package:** [`@bulutklinik/sdk`](https://www.npmjs.com/package/@bulutklinik/sdk) on npm
+- **Source:** [github.com/bulutklinik/js-sdk](https://github.com/bulutklinik/js-sdk)
+- **Spec version:** 0.1.0 (API v3)
+
+## Install
+
+```bash
+npm install @bulutklinik/sdk
+```
+
+```bash
+# or
+pnpm add @bulutklinik/sdk
+yarn add @bulutklinik/sdk
+```
+
+The package ships ESM + CommonJS builds and bundled type declarations — no
+`@types` package required.
+
+## Quick start
+
+Construct the client once and reuse it; each service group is exposed as a property.
+
+```ts
+import { BulutklinikClient } from "@bulutklinik/sdk";
+
+const client = new BulutklinikClient({
+  environment: "production", // "production" | "test" | "local"
+  clientId: "your-oauth-client-id",
+  clientSecret: "your-oauth-client-secret",
+});
+
+// 1) Log in — tokens are stored automatically.
+const login = await client.auth.connect({
+  apiUserName: "patient@example.com",
+  apiUserPassword: "•••••••",
+  loginMode: "email",
+});
+if (login.twoFactorRequired) {
+  await client.auth.connectWithTwoFactor({
+    smsVerificationCode: "123456",
+    response: login.twoFactorResponse,
+  });
+}
+
+// 2) Search for a doctor.
+const { foundDoctors } = await client.doctors.search({
+  searchParams: { withFreeText: "kardiyoloji" },
+  orderParams: ["slot"],
+  currentPage: 1,
+});
+const doctorId = foundDoctors[0].doctor_id;
+
+// 3) Read the doctor's free slots.
+const schedule = await client.slots.schedule({ doctorId, listType: "interview" });
+
+// 4) Reserve an online appointment ("Y-m-d H:i").
+await client.appointments.reserveInterview({
+  doctorId,
+  appointmentDate: "2026-06-20 14:30",
+});
+```
+
+Every data method returns the unwrapped `data` payload from the response envelope
+(see [Errors & responses](/docs/js/v0.x/errors/)); failures throw a typed error.
+
+## Client configuration
+
+`new BulutklinikClient(options?: ClientOptions)` accepts:
+
+| Option         | Type                                   | Default        | Purpose |
+|----------------|----------------------------------------|----------------|---------|
+| `environment`  | `"production" \| "test" \| "local"`    | `"production"` | Named base-URL preset. Ignored when `baseUrl` is set. |
+| `baseUrl`      | `string`                               | —              | Explicit base URL; overrides `environment`. |
+| `lang`         | `"tr" \| "en" \| "de" \| "az"`         | `"tr"`         | `lang` header sent with every request. |
+| `clientId`     | `string`                               | —              | OAuth client id (used by `connect` and token refresh). |
+| `clientSecret` | `string`                               | —              | OAuth client secret. |
+| `partnerToken` | `string`                               | —              | Bearer token for the partner (`teusan`) measures endpoint. |
+| `tokenStore`   | `TokenStore`                           | in-memory      | Pluggable token persistence (see [Authentication](/docs/js/v0.x/authentication/)). |
+| `timeoutMs`    | `number`                               | `30000`        | Per-request timeout in milliseconds. |
+| `fetch`        | `typeof fetch`                         | global `fetch` | Injectable `fetch` implementation. |
+
+### Environments
+
+| Environment  | Base URL |
+|--------------|----------|
+| `production` | `https://api.bulutklinik.com/api/v3` |
+| `test`       | `https://apitest.bulutklinik.com/api/v3` |
+| `local`      | `https://api-bulutklinik.test/api/v3` |
+
+The preset URLs are also exported as `ENVIRONMENT_BASE_URLS` if you need them directly.
+
+## Service groups
+
+| Property               | Covered in |
+|------------------------|------------|
+| `client.auth`          | [Authentication](/docs/js/v0.x/authentication/) |
+| `client.doctors`       | [Doctors](/docs/js/v0.x/doctors/) |
+| `client.slots`         | [Slots](/docs/js/v0.x/slots/) |
+| `client.appointments`  | [Appointments](/docs/js/v0.x/appointments/) |
+| `client.payments`      | [Payments](/docs/js/v0.x/payments/) |
+| `client.measures`      | [Measures](/docs/js/v0.x/measures/) |
+
+## TypeScript
+
+The SDK is written in TypeScript and exports all request/response types and the
+full error hierarchy. Importing the client gives you autocomplete for every input
+shape (`ConnectInput`, `DoctorSearchInput`, `PaymentInput`, …) and the unwrapped
+result types.

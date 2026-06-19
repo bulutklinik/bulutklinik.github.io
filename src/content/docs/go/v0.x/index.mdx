@@ -1,0 +1,159 @@
+---
+title: Overview
+description: Install the Bulutklinik Go SDK and make your first authenticated API call.
+order: 0
+---
+
+# Go SDK
+
+The official Bulutklinik API SDK for Go. It is hand-written, standard-library
+only (no third-party dependencies), context-aware and safe for concurrent use.
+
+It covers the patient flow end to end: **authentication, doctor search, availability
+slots, appointments, payments (3-D Secure) and health measures** — 6 service groups
+over 27 endpoints.
+
+- **Module:** `github.com/bulutklinik/go-sdk` (package identifier `bulutklinik`)
+- **Source:** [github.com/bulutklinik/go-sdk](https://github.com/bulutklinik/go-sdk)
+- **Spec version:** 0.1.0 (API v3)
+
+## Install
+
+```bash
+go get github.com/bulutklinik/go-sdk
+```
+
+The package imports as `bulutklinik`; this documentation aliases it to `bk`:
+
+```go
+import bk "github.com/bulutklinik/go-sdk"
+```
+
+The SDK depends only on the Go standard library — no extra modules are pulled in.
+
+## Quick start
+
+Construct the client once and reuse it; each service group is exposed as a field.
+Every method takes a `context.Context` first and returns an `error` as its last
+value. Data methods return the unwrapped `data` payload as a `json.RawMessage` —
+unmarshal it into your own structs.
+
+```go
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+
+	bk "github.com/bulutklinik/go-sdk"
+)
+
+func main() {
+	client := bk.NewClient(
+		bk.WithEnvironment(bk.Production), // Production | Test | Local
+		bk.WithCredentials("your-oauth-client-id", "your-oauth-client-secret"),
+	)
+	ctx := context.Background()
+
+	// 1) Log in — tokens are stored automatically.
+	login, err := client.Auth.Connect(ctx, bk.ConnectInput{
+		APIUserName:     "patient@example.com",
+		APIUserPassword: "•••••••",
+		LoginMode:       "email",
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	if login.TwoFactorRequired {
+		if err := client.Auth.ConnectWithTwoFactor(ctx, "123456", login.TwoFactorResponse); err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	// 2) Search for a doctor; decode data into your own type.
+	raw, err := client.Doctors.Search(ctx, bk.SearchInput{
+		SearchParams: map[string]any{"withFreeText": "kardiyoloji"},
+		OrderParams:  []string{"slot"},
+		CurrentPage:  1,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	var found struct {
+		FoundDoctors []struct {
+			DoctorID int `json:"doctor_id"`
+		} `json:"foundDoctors"`
+	}
+	if err := json.Unmarshal(raw, &found); err != nil {
+		log.Fatal(err)
+	}
+	doctorID := found.FoundDoctors[0].DoctorID
+
+	// 3) Read the doctor's free slots.
+	if _, err := client.Slots.Schedule(ctx, bk.ScheduleInput{
+		DoctorID: doctorID,
+		ListType: "interview",
+	}); err != nil {
+		log.Fatal(err)
+	}
+
+	// 4) Reserve an online appointment ("Y-m-d H:i").
+	if _, err := client.Appointments.ReserveInterview(ctx, doctorID, "2026-06-20 14:30", ""); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("reserved")
+}
+```
+
+Every data method returns the unwrapped `data` payload from the response envelope
+(see [Errors & responses](/docs/go/v0.x/errors/)); failures return a typed error.
+
+## Client configuration
+
+`NewClient(opts ...Option)` takes functional options. With no options it targets
+production with an in-memory token store and a 30s timeout.
+
+| Option                            | Argument(s)        | Default        | Purpose |
+|-----------------------------------|--------------------|----------------|---------|
+| `WithEnvironment(env)`            | `Environment`      | `Production`   | Named base-URL preset. Ignored when `WithBaseURL` is set. |
+| `WithBaseURL(u)`                  | `string`           | —              | Explicit base URL; overrides `WithEnvironment`. |
+| `WithLang(lang)`                  | `string`           | `"tr"`         | `lang` header sent with every request. |
+| `WithCredentials(id, secret)`     | `string, string`   | —              | OAuth client id/secret (used by `Connect` and token refresh). |
+| `WithPartnerToken(token)`         | `string`           | —              | Bearer token for the partner (`teusan`) measures endpoint. |
+| `WithTokenStore(ts)`              | `TokenStore`       | in-memory      | Pluggable token persistence (see [Authentication](/docs/go/v0.x/authentication/)). |
+| `WithHTTPClient(c)`               | `*http.Client`     | `&http.Client{Timeout: 30s}` | Injectable HTTP client. |
+| `WithTimeout(d)`                  | `time.Duration`    | `30 * time.Second` | Request timeout (ignored when `WithHTTPClient` is set). |
+
+`Environment` is a string type with three constants: `bk.Production`, `bk.Test`
+and `bk.Local`.
+
+### Environments
+
+| Environment  | Base URL |
+|--------------|----------|
+| `Production` | `https://api.bulutklinik.com/api/v3` |
+| `Test`       | `https://apitest.bulutklinik.com/api/v3` |
+| `Local`      | `https://api-bulutklinik.test/api/v3` |
+
+## Service groups
+
+| Field                   | Covered in |
+|-------------------------|------------|
+| `client.Auth`           | [Authentication](/docs/go/v0.x/authentication/) |
+| `client.Doctors`        | [Doctors](/docs/go/v0.x/doctors/) |
+| `client.Slots`          | [Slots](/docs/go/v0.x/slots/) |
+| `client.Appointments`   | [Appointments](/docs/go/v0.x/appointments/) |
+| `client.Payments`       | [Payments](/docs/go/v0.x/payments/) |
+| `client.Measures`       | [Measures](/docs/go/v0.x/measures/) |
+
+## Idioms
+
+The SDK follows idiomatic Go: exported methods are `PascalCase`, every call takes
+`context.Context` first, configuration uses functional `WithX` options, and inputs
+are typed structs (`ConnectInput`, `SearchInput`, `PaymentInput`, …) or positional
+arguments. Data payloads are returned as `json.RawMessage` so you decode only the
+fields you need. Failures are returned as typed errors matched with `errors.Is`
+against the package sentinels and inspected with `errors.As` (see
+[Errors & responses](/docs/go/v0.x/errors/)).

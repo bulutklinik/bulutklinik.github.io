@@ -1,0 +1,84 @@
+---
+title: Slots
+description: Read a doctor's real-time availability and build the appointment date for the next step.
+order: 3
+---
+
+# Slots
+
+`client.slots()` exposes a single method, `schedule`, which returns a doctor's free
+slots from the materialized availability table. Requires a bearer token and returns
+an `` `nlohmann::json` ``.
+
+| Method | Endpoint |
+|--------|----------|
+| `schedule(doctor_id, list_type, schedule_date?, schedule_step, schedule_page)` | `POST /patients/doctorScheduler` |
+
+## `schedule`
+
+```cpp
+auto schedule = client.slots().schedule(
+    "8282",         // doctor_id
+    "interview");   // "interview" → online slots; "appointment" → physical
+```
+
+Parameters:
+
+| Parameter       | Type                          | Required | Default | Notes |
+|-----------------|-------------------------------|:--------:|---------|-------|
+| `doctor_id`     | `std::string`                 | ✓        | —       | From a doctor search result. |
+| `list_type`     | `std::string`                 | ✓        | —       | `interview` → online slots; anything else → physical. |
+| `schedule_date` | `std::optional<std::string>`  | —        | `std::nullopt` | `Y-m-d`, today..+21. When omitted, the window is paged. |
+| `schedule_step` | `int`                         | —        | `7`     | Window size (days). |
+| `schedule_page` | `int`                         | —        | `1`     | Window page. |
+
+You can either request a single day with `schedule_date`, or page across a rolling
+window with `schedule_step` + `schedule_page`:
+
+```cpp
+// A single day:
+auto day = client.slots().schedule("8282", "interview", std::string("2026-06-20"));
+
+// Or page across a 7-day window (page 2):
+auto window = client.slots().schedule("8282", "interview", std::nullopt, 7, 2);
+```
+
+## The result
+
+`schedule` returns a **date-keyed map** (`Y-m-d` → array of slots) as an
+`` `nlohmann::json` `` object. Empty days are `[]`.
+
+```jsonc
+{
+  "2026-06-20": [
+    { "slotId": 1, "slotStart": "14:30:00", "slotEnd": "14:50:00", "available": true }
+  ],
+  "2026-06-21": []
+}
+```
+
+Each slot has `slotId`, `slotStart` / `slotEnd` (`HH:mm:ss`) and `available`.
+
+## Building the appointment date
+
+The next step ([Appointments](/docs/cpp/v0.x/appointments/) /
+[Payments](/docs/cpp/v0.x/payments/)) expects `appointment_date` as `"Y-m-d H:i"` —
+the **date key + `slotStart` with the seconds dropped**:
+
+```cpp
+std::string doctor_id = "8282";
+std::string appointment_date;
+
+for (auto it = schedule.begin(); it != schedule.end(); ++it) {
+    if (it.value().is_array() && !it.value().empty()) {
+        std::string start = it.value()[0]["slotStart"].get<std::string>();
+        appointment_date = it.key() + " " + start.substr(0, 5); // "2026-06-20 14:30"
+        break;
+    }
+}
+
+client.appointments().reserve_interview(doctor_id, appointment_date);
+```
+
+> The server resolves the actual slot from `doctor_id` + `appointment_date`; you do
+> not send `slotId` when reserving or paying.

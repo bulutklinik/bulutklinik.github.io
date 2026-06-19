@@ -1,0 +1,125 @@
+---
+title: Measures
+description: Submit and read patient health measurements — CRUD, latest values, history lists and graphs.
+order: 6
+---
+
+# Measures
+
+`client.Measures` records and reads patient health measurements (tension, glucose,
+weight, …). Patient endpoints require a bearer token; the partner endpoint uses the
+configured partner token. Records are written to the authenticated patient. Every
+method returns the unwrapped `data` as a `json.RawMessage`.
+
+| Method | Endpoint |
+|--------|----------|
+| `AddList(ctx, records)` | `POST /patients/addNewUserMeasures` |
+| `Add(ctx, type, fields)` | `POST /patients/addNewUserMeasures/{type}` |
+| `Update(ctx, type, fields)` | `PUT /patients/updateUserMeasures/{type}` |
+| `Delete(ctx, type, id)` | `DELETE /patients/deleteUserMeasures/{type}` |
+| `Last(ctx)` | `GET /patients/measuresList` |
+| `List(ctx, type, page, glucoseType)` | `GET /patients/userMeasuresList/{type}/{page}/{glucoseType?}` |
+| `Graph(ctx, type, period, page, glucoseType)` | `GET /patients/userMeasuresGraph/{type}/{period}/{page}/{glucoseType?}` |
+| `PartnerHealthInformation(ctx, identity, phoneNumber, data)` | `POST /outher/healthInformation` |
+
+Every measurement record also requires `date_time` as `"Y-m-d H:i"`.
+
+## `AddList(ctx, records)` — primary entrypoint
+
+Submit one or many measurements (of any types) in a single transaction. Records are
+`[]map[string]any`.
+
+```go
+_, err := client.Measures.AddList(ctx, []map[string]any{
+	{"type": "tension", "hypertension": 120, "hypotension": 80, "date_time": "2026-06-19 09:00"},
+	{"type": "glucose", "glucose": 95, "glucose_type": 0, "date_time": "2026-06-19 09:00"},
+	{"type": "weight", "weight": 72.5, "date_time": "2026-06-19 09:00"},
+})
+```
+
+## `Add` / `Update` / `Delete`
+
+Single-type writes. `Add` and `Update` take a `map[string]any` of fields; `id` is
+required for `Update`. `Delete` takes the id as `any`.
+
+```go
+// Add one measurement of a type.
+_, err := client.Measures.Add(ctx, "pulse", map[string]any{
+	"pulse": 68, "date_time": "2026-06-19 09:00",
+})
+
+// Update an existing record (id required).
+_, err = client.Measures.Update(ctx, "pulse", map[string]any{
+	"id": 1234, "pulse": 70, "date_time": "2026-06-19 09:00",
+})
+
+// Delete a record (id required).
+_, err = client.Measures.Delete(ctx, "pulse", 1234)
+```
+
+## Reading measurements
+
+`List` and `Graph` take `glucoseType` as `*int` — pass `nil` to omit the segment;
+`page` is `any` (an `int` or `string`).
+
+```go
+// Latest value of every type.
+latest, err := client.Measures.Last(ctx)
+
+// Paginated history for one type (page is 1-based).
+history, err := client.Measures.List(ctx, "weight", 1, nil)
+
+// Glucose splits by glucoseType (0 = fasting, 1 = postprandial).
+fasting := 0
+glucose, err := client.Measures.List(ctx, "glucose", 1, &fasting)
+
+// Grouped graph data. period: 1=day, 2=week, 3=month, 4=year.
+graph, err := client.Measures.Graph(ctx, "tension", 3, 1, nil)
+```
+
+`Last` returns the most recent of each type. Tension splits into
+`hypertension` / `hypotension` and glucose into `hunger_glucose` /
+`postprandial_glucose`, each with a `*Date`.
+
+## Measure types
+
+| `type`    | Fields |
+|-----------|--------|
+| `tension` | `hypertension` (systolic), `hypotension` (diastolic) |
+| `glucose` | `glucose`, `glucose_type` (0 = fasting, 1 = postprandial) |
+| `pulse`   | `pulse` |
+| `fever`   | `fever` |
+| `weight`  | `weight` (BMI auto-computed) |
+| `length`  | `length` (BMI auto-computed) |
+| `waist`   | `waist` |
+| `hip`     | `hip` |
+| `fat`     | `fat` |
+| `muscle`  | `muscle` |
+| `calorie` | `calorie` |
+| `step`    | `step` |
+| `sleep`   | `sleep` (hours; stored to `sleep_time`) |
+
+Values are numeric; `tension` / `pulse` are 1–10 digits, `glucose` is `0–99999.99`
+and requires `glucose_type`, weights/lengths are `0–99999.99`.
+
+## Partner submission
+
+`PartnerHealthInformation` uses the partner (`teusan`) token configured via
+`WithPartnerToken`, not the patient access token. Its `data` argument is
+`[]map[string]any`.
+
+```go
+partnerClient := bk.NewClient(bk.WithPartnerToken("…"))
+
+_, err := partnerClient.Measures.PartnerHealthInformation(ctx,
+	"12345678901",        // identity
+	"+90 555 111 22 33",   // phoneNumber
+	[]map[string]any{
+		{"type": "tension", "hypertension": 120, "hypotension": 80, "date_time": "2026-06-19 09:00"},
+	},
+)
+```
+
+> Known API behaviour: the partner endpoint has a server-side bug where `identity`
+> is nulled during validation, so matching falls back to `phoneNumber`. The SDK
+> sends the correct contract (`identity` + `phoneNumber`); send both.

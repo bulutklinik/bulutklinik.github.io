@@ -1,0 +1,66 @@
+---
+title: Appointments
+description: Reserve online interviews, create physical appointments, and cancel by event id.
+order: 4
+---
+
+# Appointments
+
+`client.appointments()` books and cancels appointments. All methods require a bearer
+token and return an `` `nlohmann::json` ``. The server resolves the slot from
+`doctor_id` + `appointment_date` — there is no `slotId` in the request.
+
+| Method | Endpoint |
+|--------|----------|
+| `reserve_interview(doctor_id, appointment_date, appointment_type)` | `POST /patients/addInterviewDateReservation` |
+| `add_physical(doctor_id, appointment_date)` | `POST /patients/addNewAppointment` |
+| `cancel(event_id)` | `DELETE /patients/deleteUserAppointment/{eventId}` |
+
+## `reserve_interview`
+
+Reserve an online (interview) slot.
+
+```cpp
+client.appointments().reserve_interview(
+    "8282",                 // doctor_id
+    "2026-06-20 14:30");    // "Y-m-d H:i", today..+21
+```
+
+Parameters:
+
+| Parameter          | Type          | Required | Default |
+|--------------------|---------------|:--------:|---------|
+| `doctor_id`        | `std::string` | ✓        | — |
+| `appointment_date` | `std::string` (`Y-m-d H:i`) | ✓ | — |
+| `appointment_type` | `std::string` | —        | `"interview"` (`"interview"` \| `"appointment"`) |
+
+A successful reservation responds with `resultType 0`, `data: null` — the returned
+`` `nlohmann::json` `` is `null`. Conflicts and validation failures throw a typed
+[error](/docs/cpp/v0.x/errors/).
+
+## `add_physical`
+
+Create an in-person (physical) appointment. No `appointment_type`.
+
+```cpp
+client.appointments().add_physical(
+    "8282",                 // doctor_id
+    "2026-06-20 14:30");    // "Y-m-d H:i"
+```
+
+| Parameter          | Type          | Required |
+|--------------------|---------------|:--------:|
+| `doctor_id`        | `std::string` | ✓        |
+| `appointment_date` | `std::string` (`Y-m-d H:i`) | ✓ |
+
+## `cancel`
+
+Cancel an appointment by its event id (`cln_events.id`), passed as a
+`` `std::string` ``.
+
+```cpp
+client.appointments().cancel(event_id);
+```
+
+> Cancellation can be rejected (server-side) for insurance appointments, once the
+> cancel window has passed, or if the event is not found — these surface as a typed error.

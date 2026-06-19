@@ -1,0 +1,103 @@
+---
+title: Doctors
+description: List branches and locations, run quick or filtered doctor searches, and fetch doctor details.
+order: 2
+---
+
+# Doctors
+
+`client.doctors` covers discovery: reference lists (branches, locations), two search
+modes, and the full doctor detail. All methods require a logged-in client (bearer token).
+
+| Method        | Endpoint |
+|---------------|----------|
+| `branches()`  | `GET /patients/allBranches` |
+| `locations()` | `GET /patients/allLocations` |
+| `quickSearch(input)` | `POST /patients/quickSearch` |
+| `search(input)`      | `POST /patients/filteredSearch` |
+| `detail(id, corporate?)` | `GET /patients/doctorDetail/{id}/{corporate?}` |
+
+## `branches()` / `locations()`
+
+Reference lists for building search filters.
+
+```ts
+const branches = await client.doctors.branches();   // Branch[]
+const locations = await client.doctors.locations(); // Location[]
+```
+
+## `quickSearch(input)`
+
+Typeahead-style search across branches, doctors, companies, treatments and blogs.
+
+```ts
+const result = await client.doctors.quickSearch({
+  searchText: "kardiyo",       // 3–100 chars
+  listType: "interview",        // "interview" | "appointment" | null
+});
+```
+
+`QuickSearchInput`:
+
+| Field        | Type                                       | Required |
+|--------------|--------------------------------------------|:--------:|
+| `searchText` | `string` (3–100)                           | ✓        |
+| `listType`   | `"interview" \| "appointment" \| null`     | —        |
+| `location`   | `string \| null`                           | —        |
+
+The result groups matches into `searchedBranches`, `searchedDoctors`,
+`searchedCompanies`, `searchedGivenTreatments`, `searchedBlogs` and `queryText`.
+
+> On the `test` environment `quickSearch` may return a 404 because the search
+> driver (Elasticsearch) is not provisioned there. Use `search` (below) — it is the
+> production search path and works in `test`.
+
+## `search(input)`
+
+Filtered, paginated doctor search. This is the primary search method.
+
+```ts
+const { foundDoctorsCount, foundDoctors } = await client.doctors.search({
+  searchParams: {
+    withFreeText: "kardiyoloji",
+    withLocationId: 34,
+  },
+  orderParams: ["slot"],          // "name" | "point" | "slot" | "order"
+  otherParams: ["isInterviewable"], // "isKizilay" | "isQuestionable" | "isInterviewable" | "isAppointmentable"
+  currentPage: 1,                 // >= 1 (required)
+  perPageLimit: 20,               // 10–100, default 20
+});
+```
+
+`DoctorSearchInput`:
+
+| Field          | Type            | Required | Default |
+|----------------|-----------------|:--------:|---------|
+| `searchParams` | `SearchParams`  | —        | `{}` |
+| `orderParams`  | `OrderParam[]`  | —        | `[]` |
+| `otherParams`  | `OtherParam[]`  | —        | `[]` |
+| `currentPage`  | `number`        | ✓        | — |
+| `perPageLimit` | `number` (10–100) | —      | `20` |
+
+`SearchParams` keys (all optional): `withFreeText`, `withDoctorName`,
+`withBranchName`, `withBranchId` (`-1` excludes psychology/diet), `withLocationName`,
+`withLocationId`, `withCompanyName`, `withCompanyId`, `withGivenTreatments`,
+`withExpertyId`, `withInstitutionId`, `withNearestSlotDayRange`.
+
+The result is `{ foundDoctorsCount, foundDoctors }`, where each doctor includes
+`doctor_id`, `name`, `surname`, `branch_name`, `star_rate`, `nearest_slot`,
+`isInterviewable`, `isAppointmentable`, `url`, `user_image` and more. The
+`doctor_id` feeds [Slots](/docs/js/v0.x/slots/) and [Appointments](/docs/js/v0.x/appointments/).
+
+## `detail(id, corporate?)`
+
+Full doctor profile. `id` is the `doctor_id` from a search result; `corporate` is optional.
+
+```ts
+const detail = await client.doctors.detail(8282);
+// or scoped to a corporate/clinic context:
+const detail2 = await client.doctors.detail(8282, corporateId);
+```
+
+The payload includes `doctorGeneralInfo` (prices, session length, branch),
+education, languages, reviews, videos, special services and related clinics.

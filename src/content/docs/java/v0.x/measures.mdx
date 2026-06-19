@@ -1,0 +1,126 @@
+---
+title: Measures
+description: Submit and read patient health measurements — CRUD, latest values, history lists and graphs.
+order: 6
+---
+
+# Measures
+
+`client.measures` records and reads patient health measurements (tension, glucose,
+weight, …). Patient endpoints require a bearer token; the partner endpoint uses the
+configured partner token. Records are written to the authenticated patient. All
+methods return a Jackson `JsonNode`.
+
+| Method                                                | Endpoint |
+|-------------------------------------------------------|----------|
+| `addList(records)`                                    | `POST /patients/addNewUserMeasures` |
+| `add(measureType, fields)`                            | `POST /patients/addNewUserMeasures/{type}` |
+| `update(measureType, fields)`                         | `PUT /patients/updateUserMeasures/{type}` |
+| `delete(measureType, id)`                             | `DELETE /patients/deleteUserMeasures/{type}` |
+| `last()`                                              | `GET /patients/measuresList` |
+| `list(measureType, page, glucoseType)`                | `GET /patients/userMeasuresList/{type}/{page}/{glucoseType?}` |
+| `graph(measureType, period, page, glucoseType)`       | `GET /patients/userMeasuresGraph/{type}/{period}/{page}/{glucoseType?}` |
+| `partnerHealthInformation(identity, phoneNumber, data)` | `POST /outher/healthInformation` |
+
+Every measurement record also requires `date_time` as `"yyyy-MM-dd HH:mm"`.
+
+## `addList(records)` — primary entrypoint
+
+Submit one or many measurements (of any types) in a single transaction. `records`
+is a `List<Map<String, Object>>`.
+
+```java
+import java.util.List;
+import java.util.Map;
+
+client.measures.addList(List.of(
+        Map.of("type", "tension", "hypertension", 120, "hypotension", 80, "date_time", "2026-06-19 09:00"),
+        Map.of("type", "glucose", "glucose", 95, "glucose_type", 0, "date_time", "2026-06-19 09:00"),
+        Map.of("type", "weight", "weight", 72.5, "date_time", "2026-06-19 09:00")));
+```
+
+## `add` / `update` / `delete`
+
+Single-type writes. `fields` is a `Map<String, Object>` carrying the type's values
+plus `date_time` (and `id` for `update`).
+
+```java
+// Add one measurement of a type.
+client.measures.add("pulse", Map.of("pulse", 68, "date_time", "2026-06-19 09:00"));
+
+// Update an existing record (id required).
+client.measures.update("pulse", Map.of("id", 1234, "pulse", 70, "date_time", "2026-06-19 09:00"));
+
+// Delete a record (id required). id is typed as Object.
+client.measures.delete("pulse", 1234);
+```
+
+## Reading measurements
+
+`page` is typed as `Object` (1-based); `glucoseType` is an `Integer` — pass `null`
+to omit the segment.
+
+```java
+// Latest value of every type.
+JsonNode latest = client.measures.last();
+
+// Paginated history for one type (page is 1-based).
+JsonNode history = client.measures.list("weight", 1, null);
+
+// Glucose splits by glucoseType (0 = fasting, 1 = postprandial).
+JsonNode glucose = client.measures.list("glucose", 1, 0);
+
+// Grouped graph data. period: 1=day, 2=week, 3=month, 4=year.
+JsonNode graph = client.measures.graph("tension", 3, 1, null);
+```
+
+`last()` returns the most recent of each type. Tension splits into
+`hypertension` / `hypotension` and glucose into `hunger_glucose` /
+`postprandial_glucose`, each with a `*Date`.
+
+## Measure types
+
+Every record also requires `date_time` as `"yyyy-MM-dd HH:mm"`.
+
+| `type`    | Fields |
+|-----------|--------|
+| `tension` | `hypertension` (systolic), `hypotension` (diastolic) |
+| `glucose` | `glucose`, `glucose_type` (0 = fasting, 1 = postprandial) |
+| `pulse`   | `pulse` |
+| `fever`   | `fever` |
+| `weight`  | `weight` (BMI auto-computed) |
+| `length`  | `length` (BMI auto-computed) |
+| `waist`   | `waist` |
+| `hip`     | `hip` |
+| `fat`     | `fat` |
+| `muscle`  | `muscle` |
+| `calorie` | `calorie` |
+| `step`    | `step` |
+| `sleep`   | `sleep` (hours; stored to `sleep_time`) |
+
+Values are numeric; `tension` / `pulse` are 1–10 digits, `glucose` is `0–99999.99`
+and requires `glucose_type` (`0` \| `1`), and weights/lengths are `0–99999.99`.
+
+## Partner submission
+
+`partnerHealthInformation` uses the partner (`teusan`) token configured via
+`.partnerToken(...)`, not the patient access token. `data` is a
+`List<Map<String, Object>>`.
+
+```java
+import java.util.List;
+import java.util.Map;
+
+BulutklinikClient partnerClient = BulutklinikClient.builder()
+        .partnerToken("…")
+        .build();
+
+partnerClient.measures.partnerHealthInformation(
+        "12345678901",            // identity
+        "+90 555 111 22 33",      // phoneNumber
+        List.of(Map.of("type", "tension", "hypertension", 120, "hypotension", 80, "date_time", "2026-06-19 09:00")));
+```
+
+> Known API behaviour: the partner endpoint has a server-side bug where `identity`
+> is nulled during validation, so matching falls back to `phoneNumber`. The SDK
+> sends the correct contract (`identity` + `phoneNumber`); send both.

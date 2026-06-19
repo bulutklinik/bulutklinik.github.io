@@ -1,0 +1,90 @@
+---
+title: Slots
+description: Read a doctor's real-time availability and build the appointment date for the next step.
+order: 3
+---
+
+# Slots
+
+`client.slots` exposes a single method, `schedule`, which returns a doctor's free
+slots from the materialized availability table as a Jackson `JsonNode`. Requires a
+bearer token.
+
+| Method                                                    | Endpoint |
+|-----------------------------------------------------------|----------|
+| `schedule(doctorId, listType)`                            | `POST /patients/doctorScheduler` |
+| `schedule(doctorId, listType, scheduleDate, scheduleStep, schedulePage)` | `POST /patients/doctorScheduler` |
+
+## `schedule(...)`
+
+There are two overloads. The short form uses sensible defaults (`scheduleDate`
+`null`, `scheduleStep` `7`, `schedulePage` `1`); the long form lets you pin a day
+or page across a window.
+
+```java
+// Short form — paged window with defaults.
+JsonNode schedule = client.slots.schedule(8282, "interview");
+
+// Long form — a single day.
+JsonNode oneDay = client.slots.schedule(8282, "interview", "2026-06-20", 7, 1);
+```
+
+`schedule` parameters:
+
+| Parameter      | Type     | Required | Default | Notes |
+|----------------|----------|:--------:|---------|-------|
+| `doctorId`     | `Object` | ✓        | —       | From a doctor search result (`int`, `Integer` or `String`). |
+| `listType`     | `String` | ✓        | —       | `"interview"` → online slots; anything else → physical. |
+| `scheduleDate` | `String` | —        | `null`  | `yyyy-MM-dd`, today..+21. When omitted, the window is paged. |
+| `scheduleStep` | `Object` | —        | `7`     | Window size (days). |
+| `schedulePage` | `Object` | —        | `1`     | Window page. |
+
+You can either request a single day with `scheduleDate`, or page across a rolling
+window with `scheduleStep` + `schedulePage`.
+
+## The result
+
+`schedule` returns a **date-keyed object** (`yyyy-MM-dd` → array of slots). Empty
+days are `[]`.
+
+```java
+// {
+//   "2026-06-20": [
+//     { "slotId": 1, "slotStart": "14:30:00", "slotEnd": "14:50:00", "available": true },
+//     ...
+//   ],
+//   "2026-06-21": []
+// }
+```
+
+Each slot has `slotId`, `slotStart` / `slotEnd` (`HH:mm:ss`) and `available`.
+
+## Building the appointment date
+
+The next step ([Appointments](/docs/java/v0.x/appointments/) / [Payments](/docs/java/v0.x/payments/))
+expects `appointmentDate` as `"yyyy-MM-dd HH:mm"` — the **date key + `slotStart` with
+the seconds dropped**:
+
+```java
+import java.util.Iterator;
+import java.util.Map;
+import com.fasterxml.jackson.databind.JsonNode;
+
+JsonNode schedule = client.slots.schedule(8282, "interview");
+
+String appointmentDate = null;
+Iterator<Map.Entry<String, JsonNode>> it = schedule.fields();
+while (it.hasNext()) {
+    Map.Entry<String, JsonNode> day = it.next();
+    if (day.getValue().size() > 0) {
+        String start = day.getValue().get(0).get("slotStart").asText(); // "14:30:00"
+        appointmentDate = day.getKey() + " " + start.substring(0, 5);   // "2026-06-20 14:30"
+        break;
+    }
+}
+
+client.appointments.reserveInterview(8282, appointmentDate);
+```
+
+> The server resolves the actual slot from `doctorId` + `appointmentDate`; you do
+> not send `slotId` when reserving or paying.

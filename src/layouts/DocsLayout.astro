@@ -1,0 +1,161 @@
+---
+import Base from "./Base.astro";
+
+interface NavItem {
+  href: string;
+  label: string;
+  active: boolean;
+}
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+
+interface Props {
+  title: string;
+  description?: string;
+  langName: string;
+  repo: string;
+  nav: NavItem[];
+  langSwitch: NavItem[];
+  headings?: Heading[];
+}
+
+const { title, description, langName, repo, nav, langSwitch, headings = [] } = Astro.props;
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+const pageTitle = `${title} · ${langName} SDK · Bulutklinik Developer`;
+---
+
+<Base title={pageTitle} description={description}>
+  <!-- Header -->
+  <header class="sticky top-0 z-40 border-b border-slate-200/70 bg-white/80 backdrop-blur-md">
+    <div class="mx-auto flex h-16 max-w-7xl items-center justify-between px-5">
+      <div class="flex items-center gap-2.5">
+        <a href="/" class="flex items-center gap-2.5">
+          <img src="/bulutklinik-wordmark.svg" alt="Bulutklinik" class="h-7 w-auto" />
+        </a>
+        <span class="text-slate-300">/</span>
+        <a href="/docs" class="text-sm font-semibold text-slate-700 transition hover:text-slate-900">docs</a>
+        <span class="hidden text-slate-300 sm:inline">/</span>
+        <span class="hidden text-sm font-medium text-brand-700 sm:inline">{langName}</span>
+      </div>
+      <nav class="flex items-center gap-5 text-sm font-medium text-slate-600">
+        <a href="/" class="hidden transition hover:text-slate-900 sm:inline">Home</a>
+        <a href="/docs" class="hidden transition hover:text-slate-900 sm:inline">All SDKs</a>
+        <a href={repo} class="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-1.5 transition hover:border-slate-400 hover:text-slate-900">
+          GitHub
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M7 7h10v10"/></svg>
+        </a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="mx-auto flex max-w-7xl gap-8 px-5">
+    <!-- Sidebar -->
+    <aside class="hidden w-60 shrink-0 lg:block">
+      <div class="sticky top-16 max-h-[calc(100vh-4rem)] overflow-y-auto py-8 pr-2">
+        <label for="lang-switch" class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">SDK</label>
+        <select
+          id="lang-switch"
+          class="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm font-medium text-slate-700 shadow-sm focus:border-brand-500 focus:outline-none"
+        >
+          {langSwitch.map((l) => (
+            <option value={l.href} selected={l.active}>{l.label}</option>
+          ))}
+        </select>
+
+        <nav class="mt-6">
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Guide</p>
+          <ul class="mt-2 space-y-0.5">
+            {nav.map((item) => (
+              <li>
+                <a
+                  href={item.href}
+                  class:list={[
+                    "block rounded-lg px-3 py-1.5 text-sm transition",
+                    item.active
+                      ? "bg-brand-50 font-semibold text-brand-700"
+                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900",
+                  ]}
+                >
+                  {item.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+      </div>
+    </aside>
+
+    <!-- Content -->
+    <main class="min-w-0 flex-1 py-8">
+      <!-- Mobile nav -->
+      <details class="mb-6 rounded-xl border border-slate-200 bg-slate-50 lg:hidden">
+        <summary class="cursor-pointer px-4 py-3 text-sm font-semibold text-slate-700">Menu — {langName} SDK</summary>
+        <div class="border-t border-slate-200 p-4">
+          <select
+            id="lang-switch-mobile"
+            class="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm font-medium text-slate-700"
+          >
+            {langSwitch.map((l) => (
+              <option value={l.href} selected={l.active}>{l.label}</option>
+            ))}
+          </select>
+          <ul class="mt-3 space-y-0.5">
+            {nav.map((item) => (
+              <li>
+                <a
+                  href={item.href}
+                  class:list={[
+                    "block rounded-lg px-3 py-1.5 text-sm transition",
+                    item.active ? "bg-white font-semibold text-brand-700" : "text-slate-600",
+                  ]}
+                >
+                  {item.label}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </details>
+
+      <article class="doc-prose max-w-3xl pb-20">
+        <slot />
+      </article>
+    </main>
+
+    <!-- On this page -->
+    {toc.length > 0 && (
+      <aside class="hidden w-56 shrink-0 xl:block">
+        <div class="sticky top-16 max-h-[calc(100vh-4rem)] overflow-y-auto py-8">
+          <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">On this page</p>
+          <ul class="mt-2 space-y-1.5 border-l border-slate-200">
+            {toc.map((h) => (
+              <li>
+                <a
+                  href={`#${h.slug}`}
+                  class:list={[
+                    "-ml-px block border-l border-transparent text-sm text-slate-500 transition hover:border-brand-400 hover:text-slate-900",
+                    h.depth === 3 ? "pl-6" : "pl-3",
+                  ]}
+                >
+                  {h.text}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </aside>
+    )}
+  </div>
+
+  <script>
+    // Language switcher: navigate on change (sidebar + mobile).
+    document.querySelectorAll<HTMLSelectElement>("#lang-switch, #lang-switch-mobile").forEach((sel) => {
+      sel.addEventListener("change", () => {
+        if (sel.value) window.location.href = sel.value;
+      });
+    });
+  </script>
+</Base>

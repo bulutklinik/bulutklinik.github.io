@@ -1,0 +1,124 @@
+---
+title: Errors & responses
+description: The response envelope, the typed exception hierarchy, and how the SDK maps failures to exceptions.
+order: 7
+---
+
+# Errors & responses
+
+## The response envelope
+
+Every API response is a JSON envelope. The SDK unwraps it for you — on success it
+returns the `data` payload directly (as a `JsonElement`); on failure it throws a
+typed exception.
+
+```jsonc
+{
+  "resultType": 0,            // state code (see below)
+  "errorType": "validation",  // string label OR numeric code
+  "errorMessage": "…",        // human-readable, localized via `lang`
+  "successMessage": "…",
+  "data": { /* payload */ }   // what the SDK returns on success
+}
+```
+
+A call is successful only when the HTTP status is 2xx **and** `resultType == 0`.
+The `resultType` state codes:
+
+| Value | Name      | Meaning |
+|:-----:|-----------|---------|
+| `0`   | `Success` | Return `data`. |
+| `1`   | `Error`   | Throw `ApiException` (or a subtype). |
+| `2`   | `Logout`  | Session revoked — token store cleared, `AuthenticationException`. |
+| `3`   | `Update`  | Client/app too old — `ApiException`. |
+| `4`   | `Refresh` | Token expired — triggers silent refresh + retry. |
+
+> `errorType` is **polymorphic**: some endpoints return a string label
+> (`"validation"`), others a numeric code. The SDK treats it as a refinement hint
+> only when it is a string.
+
+## Exception hierarchy
+
+All errors extend `BulutklinikException`:
+
+```
+BulutklinikException                 (base — all SDK errors)
+├── TransportException               (network failure, timeout, DNS, TLS — no HTTP response)
+└── ApiException                     (an HTTP response that wasn't a success)
+    ├── ValidationException          (422, or errorType "validation")
+    ├── AuthenticationException      (401 / logout / failed refresh)
+    ├── AuthorizationException       (403)
+    ├── NotFoundException            (404)
+    └── RateLimitException           (429 — RetryAfter on the context)
+```
+
+`TransportException` carries the underlying `HttpRequestException` /
+`TaskCanceledException` as its `InnerException`. Every `ApiException` carries a
+`Context` property of type `ApiErrorContext`:
+
+```csharp
+public sealed record ApiErrorContext(
+    int HttpStatus,
+    int? ResultType,
+    object? ErrorType,
+    JsonElement Data,
+    string Method,
+    string Path,
+    int? RetryAfter);
+```
+
+| Member       | Type          | Notes |
+|--------------|---------------|-------|
+| `HttpStatus` | `int`         | The HTTP status code. |
+| `ResultType` | `int?`        | The envelope `resultType`, when present. |
+| `ErrorType`  | `object?`     | The envelope `errorType` — a `string` label, a `double` numeric code, or `null`. |
+| `Data`       | `JsonElement` | The raw `data` from the envelope. |
+| `Method`     | `string`      | The request HTTP method. |
+| `Path`       | `string`      | The request path. |
+| `RetryAfter` | `int?`        | Seconds to wait (set on `RateLimitException` when the `Retry-After` header is present). |
+
+```csharp
+using Bulutklinik.Sdk;
+
+try
+{
+    await client.Payments.PayAsync(input);
+}
+catch (RateLimitException e)
+{
+    Console.WriteLine($"throttled — retry after {e.Context.RetryAfter}s");
+}
+catch (ValidationException e)
+{
+    Console.WriteLine($"invalid request: {e.Context.Data}");
+}
+catch (AuthenticationException)
+{
+    Console.WriteLine("session expired — re-login required");
+}
+catch (TransportException e)
+{
+    Console.WriteLine($"network problem: {e.InnerException?.Message}");
+}
+catch (ApiException e)
+{
+    Console.WriteLine($"API error {e.Context.HttpStatus} on {e.Context.Method} {e.Context.Path}");
+}
+```
+
+Because the subtypes derive from `ApiException` (which derives from
+`BulutklinikException`), order your `catch` blocks most-specific first — the
+`ApiException` block above is the catch-all for any non-mapped failure.
+
+## Mapping precedence
+
+The SDK picks the most specific exception type in this order:
+
+1. `ResultType == 2` (logout) → `AuthenticationException`
+2. string `ErrorType == "validation"` (case-insensitive) or HTTP 422 → `ValidationException`
+3. HTTP status: 401 → `AuthenticationException`, 403 → `AuthorizationException`,
+   404 → `NotFoundException`, 429 → `RateLimitException`
+4. otherwise (including numeric `ErrorType`, or 2xx with `ResultType != 0`) → `ApiException`
+
+Because `ErrorType` may be numeric, the SDK guards before string-matching it — and
+so should any code that inspects `e.Context.ErrorType` (it is typed `object?`).

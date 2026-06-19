@@ -1,0 +1,217 @@
+---
+title: Authentication
+description: Log in, handle two-factor challenges, refresh and revoke tokens, and plug in custom token storage.
+order: 1
+---
+
+# Authentication
+
+Bulutklinik uses OAuth2 (Laravel Passport). The token grant happens server-side
+inside `connect` — the SDK never calls `oauth/token` directly. Access tokens last
+~30 days and refresh tokens ~130 days.
+
+`client.auth` exposes five methods: `connect`, `connect_with_two_factor`,
+`register`, `refresh` and `disconnect`. Tokens obtained by `connect` /
+`connect_with_two_factor` / `register` are stored automatically.
+
+| Method | Endpoint |
+|--------|----------|
+| `connect(api_user_name, api_user_password, login_mode, *, client_id=None, client_secret=None, with_phone_number=None)` | `POST /general/connectApi` |
+| `connect_with_two_factor(sms_verification_code, response)` | `POST /general/connectApiWithTwoFactor` |
+| `register(*, name, surname, api_user_name, phone_number, password, sms_verification_code, response, accept_user_agreement=1, client_id=None, client_secret=None)` | `POST /patients/addNewPatient` |
+| `refresh()` | `POST /general/refreshApi` |
+| `disconnect()` | `POST /general/disconnectApi` |
+
+> Async: every method above is awaitable on `AsyncBulutklinikClient` under the same
+> name — e.g. `await client.auth.connect(...)`.
+
+## `auth.connect`
+
+`POST /general/connectApi` · public (no bearer token). The first three parameters
+are positional; OAuth credentials default to the client's configured values.
+
+```python
+login = client.auth.connect(
+    "patient@example.com",
+    "•••••••",
+    "email",
+)
+```
+
+Parameters:
+
+| Parameter           | Type          | Required | Notes |
+|---------------------|---------------|:--------:|-------|
+| `api_user_name`     | `str`         | ✓        | Identifier per `login_mode` (email / TC / phone / user id). |
+| `api_user_password` | `str \| None` | ✓*       | Required except in `social` / `afterRegister` modes — pass `None` there. |
+| `login_mode`        | `str`         | ✓        | `"email"` \| `"identity"` \| `"phone"` \| `"user_id"` \| `"social"` \| `"afterRegister"`. |
+| `client_id`         | `str \| None` | —        | Keyword-only. Defaults to the client's configured `client_id`. |
+| `client_secret`     | `str \| None` | —        | Keyword-only. Defaults to the client's configured `client_secret`. |
+| `with_phone_number` | `str \| None` | —        | Keyword-only. Some installs require it in `phone` mode. |
+
+`connect` returns a `LoginResult` dataclass — **always check `two_factor_required`**:
+
+```python
+login = client.auth.connect("patient@example.com", "•••••••", "email")
+
+if login.two_factor_required:
+    # login.two_factor_response is an encrypted blob — pass it on with the SMS code.
+    client.auth.connect_with_two_factor("123456", login.two_factor_response)
+else:
+    # Logged in. Access + refresh tokens are already stored.
+    ...
+```
+
+`LoginResult` fields:
+
+| Field                  | Type          | Notes |
+|------------------------|---------------|-------|
+| `two_factor_required`  | `bool`        | `True` when SMS two-factor is pending. |
+| `two_factor_response`  | `str \| None` | The encrypted blob to forward to `connect_with_two_factor` (only set when 2FA is required). |
+
+When SMS two-factor is enabled the response carries no access token; instead it
+returns the encrypted `two_factor_response` blob. When 2FA is **not** required, the
+access + refresh tokens are minted and stored during `connect`.
+
+## `auth.connect_with_two_factor`
+
+`POST /general/connectApiWithTwoFactor` · public. Returns `None`; the minted tokens
+are stored on success.
+
+```python
+client.auth.connect_with_two_factor(
+    "123456",                    # the SMS verification code
+    login.two_factor_response,   # the blob from connect()
+)
+```
+
+The tokens are minted during `connect` and returned (and stored) here. The SDK
+sends only `sms_verification_code` + `response`.
+
+## `auth.register`
+
+`POST /patients/addNewPatient` · public (guarded by SMS verification + throttle).
+All parameters are **keyword-only**; returns `None` and stores the auto-login tokens.
+
+```python
+client.auth.register(
+    name="Ada",
+    surname="Lovelace",
+    api_user_name="+90 555 111 22 33",  # same +CC value as phone_number
+    phone_number="+90 555 111 22 33",
+    password="•••••••",
+    sms_verification_code="123456",
+    response=sms_verify_blob,            # from the prior SMS-verification step
+)
+```
+
+`register` parameters:
+
+| Parameter               | Type          | Required | Default | Notes |
+|-------------------------|---------------|:--------:|---------|-------|
+| `name`                  | `str`         | ✓        | —       | |
+| `surname`               | `str`         | ✓        | —       | |
+| `api_user_name`         | `str`         | ✓        | —       | Should equal `phone_number` (the `+CC` form); becomes the `afterRegister` login username. |
+| `phone_number`          | `str`         | ✓        | —       | Must start with `+` and a country code. |
+| `password`              | `str`         | ✓        | —       | |
+| `sms_verification_code` | `str`         | ✓        | —       | From the prior SMS-verification step. |
+| `response`              | `str`         | ✓        | —       | The encrypted blob from the prior SMS-verification step. |
+| `accept_user_agreement` | `int`         | —        | `1`     | |
+| `client_id`             | `str \| None` | —        | client default | |
+| `client_secret`         | `str \| None` | —        | client default | |
+
+Rules enforced by the API:
+
+- `phone_number` must start with `+` and a country code (e.g. `+90 555 111 22 33`); bare digits are rejected.
+- `api_user_name` should equal `phone_number` (the `+CC` form) — it becomes the `afterRegister` login username.
+
+> The SMS-verification step that produces the `response` blob is **not** part of
+> the SDK surface; obtain `response` + `sms_verification_code` beforehand. On success
+> the patient is created and auto-logged-in (`afterRegister`), so tokens are stored.
+
+## Silent auto-refresh & retry
+
+Every protected call carries the stored access token. If the API answers `401`
+(or `resultType 4`, the refresh signal) and a refresh token is available, the SDK:
+
+1. calls the refresh endpoint with the stored refresh token + client credentials,
+2. persists the rotated tokens,
+3. retries the original request **once**.
+
+The retry is bounded to one attempt. If the refresh fails — or the API returns
+`resultType 2` (logout) — the token store is cleared and an
+[`AuthenticationError`](/docs/python/v0.x/errors/) is raised.
+
+You rarely need to call `refresh` yourself, but it is available:
+
+```python
+client.auth.refresh()  # POST /general/refreshApi
+```
+
+> `refresh` requires `client_id` / `client_secret` on the client and a stored
+> refresh token. If the refresh call fails, an `AuthenticationError` is raised.
+
+## `auth.disconnect`
+
+`POST /general/disconnectApi` · bearer. Revokes the tokens server-side, then clears
+the local token store (even if the network call fails).
+
+```python
+client.auth.disconnect()
+```
+
+## Token store
+
+Tokens live in a pluggable `TokenStore`. The default is `InMemoryTokenStore` (lost
+on process exit). `TokenStore` is a runtime-checkable `Protocol` — implement its
+four methods to persist to a file, database or secure storage:
+
+```python
+from bulutklinik import BulutklinikClient, TokenStore
+
+class FileTokenStore:
+    def get_access_token(self) -> str | None:
+        return read_token("access")
+
+    def get_refresh_token(self) -> str | None:
+        return read_token("refresh")
+
+    def set_tokens(self, access_token: str, refresh_token: str | None) -> None:
+        write_tokens(access_token, refresh_token)
+
+    def clear(self) -> None:
+        clear_tokens()
+
+client = BulutklinikClient(
+    client_id="…",
+    client_secret="…",
+    token_store=FileTokenStore(),
+)
+```
+
+The `TokenStore` protocol:
+
+```python
+from typing import Protocol
+
+class TokenStore(Protocol):
+    def get_access_token(self) -> str | None: ...
+    def get_refresh_token(self) -> str | None: ...
+    def set_tokens(self, access_token: str, refresh_token: str | None) -> None: ...
+    def clear(self) -> None: ...
+```
+
+The bundled `InMemoryTokenStore` can be seeded with existing tokens — handy for
+resuming a session:
+
+```python
+from bulutklinik import BulutklinikClient, InMemoryTokenStore
+
+token_store = InMemoryTokenStore(access_token, refresh_token)
+client = BulutklinikClient(client_id="…", client_secret="…", token_store=token_store)
+```
+
+The active store is also reachable as `client.token_store`.
+
+> The same `TokenStore` works for both `BulutklinikClient` and
+> `AsyncBulutklinikClient`; the store methods are synchronous in both.

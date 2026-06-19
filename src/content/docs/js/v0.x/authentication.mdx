@@ -1,0 +1,165 @@
+---
+title: Authentication
+description: Log in, handle two-factor challenges, refresh and revoke tokens, and plug in custom token storage.
+order: 1
+---
+
+# Authentication
+
+Bulutklinik uses OAuth2 (Laravel Passport). The token grant happens server-side
+inside `connect` — the SDK never calls `oauth/token` directly. Access tokens last
+~30 days and refresh tokens ~130 days.
+
+`client.auth` exposes five methods: `connect`, `connectWithTwoFactor`, `register`,
+`refresh` and `disconnect`. Tokens obtained by `connect` / `connectWithTwoFactor` /
+`register` are stored automatically.
+
+## `auth.connect`
+
+`POST /general/connectApi` · public (no bearer token).
+
+```ts
+const login = await client.auth.connect({
+  apiUserName: "patient@example.com",
+  apiUserPassword: "•••••••",
+  loginMode: "email",
+});
+```
+
+`ConnectInput` fields:
+
+| Field             | Type        | Required | Notes |
+|-------------------|-------------|:--------:|-------|
+| `apiUserName`     | `string`    | ✓        | Identifier per `loginMode` (email / TC / phone / user id). |
+| `apiUserPassword` | `string`    | ✓*       | Required except in `social` / `afterRegister` modes. |
+| `loginMode`       | `LoginMode` | ✓        | `"email" \| "identity" \| "phone" \| "user_id" \| "social" \| "afterRegister"`. |
+| `clientId`        | `string`    | —        | Defaults to the client's configured `clientId`. |
+| `clientSecret`    | `string`    | —        | Defaults to the client's configured `clientSecret`. |
+| `withPhoneNumber` | `string`    | —        | Some installs require it in `phone` mode. |
+
+The result is a discriminated union — **always check `twoFactorRequired`**:
+
+```ts
+const login = await client.auth.connect({ apiUserName, apiUserPassword, loginMode: "email" });
+
+if (login.twoFactorRequired) {
+  // login.twoFactorResponse is an encrypted blob — pass it on with the SMS code.
+} else {
+  // Logged in. login.passwordPolicy may carry the account's password policy.
+}
+```
+
+When SMS two-factor is enabled the response carries no access token; instead it
+returns an encrypted `twoFactorResponse` blob to forward to `connectWithTwoFactor`.
+
+## `auth.connectWithTwoFactor`
+
+`POST /general/connectApiWithTwoFactor` · public.
+
+```ts
+await client.auth.connectWithTwoFactor({
+  smsVerificationCode: "123456",
+  response: login.twoFactorResponse, // the blob from connect()
+});
+```
+
+Tokens are minted during `connect` and returned (and stored) here. The SDK sends
+only `smsVerificationCode` + `response`.
+
+## `auth.register`
+
+`POST /patients/addNewPatient` · public (guarded by SMS verification + throttle).
+
+```ts
+await client.auth.register({
+  name: "Ada",
+  surname: "Lovelace",
+  apiUserName: "+90 555 111 22 33", // same +CC value as phoneNumber
+  phoneNumber: "+90 555 111 22 33",
+  password: "•••••••",
+  smsVerificationCode: "123456",
+  response: smsVerifyBlob, // from the prior SMS-verification step
+});
+```
+
+Rules enforced by the API:
+
+- `phoneNumber` must start with `+` and a country code (e.g. `+90 555 111 22 33`); bare digits are rejected.
+- `apiUserName` should equal `phoneNumber` (the `+CC` form) — it becomes the `afterRegister` login username.
+- `acceptUserAgreement` defaults to `1`.
+
+> The SMS-verification step that produces the `response` blob is **not** part of
+> the SDK surface; obtain `response` + `smsVerificationCode` beforehand. On success
+> the patient is created and auto-logged-in (`afterRegister`), so tokens are stored.
+
+## Silent auto-refresh & retry
+
+Every protected call carries the stored access token. If the API answers `401`
+(or `resultType 4`, the refresh signal) and a refresh token is available, the SDK:
+
+1. calls `auth.refresh` with the stored refresh token + client credentials,
+2. persists the rotated tokens,
+3. retries the original request **once**.
+
+The retry is bounded to one attempt, and concurrent 401s share a single in-flight
+refresh (no refresh stampede). If the refresh fails — or the API returns
+`resultType 2` (logout) — the token store is cleared and an
+[`AuthenticationError`](/docs/js/v0.x/errors/) is thrown.
+
+You rarely need to call `refresh` yourself, but it is available:
+
+```ts
+await client.auth.refresh(); // POST /general/refreshApi
+```
+
+> `refresh` requires `clientId` / `clientSecret` on the client and a stored refresh token.
+
+## `auth.disconnect`
+
+`POST /general/disconnectApi` · bearer. Revokes the tokens server-side, then clears
+the local token store (even if the network call fails).
+
+```ts
+await client.auth.disconnect();
+```
+
+## Token store
+
+Tokens live in a pluggable `TokenStore`. The default is in-memory (lost on process
+exit). Implement the interface to persist to a file, database or secure storage:
+
+```ts
+import { BulutklinikClient, type TokenStore } from "@bulutklinik/sdk";
+
+const fileStore: TokenStore = {
+  getAccessToken: () => readToken("access"),     // string | null (sync or async)
+  getRefreshToken: () => readToken("refresh"),
+  setTokens: (access, refresh) => writeTokens(access, refresh),
+  clear: () => clearTokens(),
+};
+
+const client = new BulutklinikClient({ clientId, clientSecret, tokenStore: fileStore });
+```
+
+The `TokenStore` interface:
+
+```ts
+interface TokenStore {
+  getAccessToken(): string | null | Promise<string | null>;
+  getRefreshToken(): string | null | Promise<string | null>;
+  setTokens(accessToken: string, refreshToken: string | null): void | Promise<void>;
+  clear(): void | Promise<void>;
+}
+```
+
+The bundled `MemoryTokenStore` can be seeded with existing tokens — handy for
+resuming a session:
+
+```ts
+import { MemoryTokenStore } from "@bulutklinik/sdk";
+
+const tokenStore = new MemoryTokenStore({ accessToken, refreshToken });
+const client = new BulutklinikClient({ clientId, clientSecret, tokenStore });
+```
+
+The active store is also reachable as `client.tokenStore`.

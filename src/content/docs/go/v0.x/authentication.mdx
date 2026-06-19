@@ -1,0 +1,198 @@
+---
+title: Authentication
+description: Log in, handle two-factor challenges, refresh and revoke tokens, and plug in custom token storage.
+order: 1
+---
+
+# Authentication
+
+Bulutklinik uses OAuth2 (Laravel Passport). The token grant happens server-side
+inside `Connect` — the SDK never calls `oauth/token` directly. Access tokens last
+~30 days and refresh tokens ~130 days.
+
+`client.Auth` exposes five methods: `Connect`, `ConnectWithTwoFactor`, `Register`,
+`Refresh` and `Disconnect`. Tokens obtained by `Connect` / `ConnectWithTwoFactor` /
+`Register` are stored automatically.
+
+| Method | Endpoint |
+|--------|----------|
+| `Connect(ctx, in) (*LoginResult, error)` | `POST /general/connectApi` |
+| `ConnectWithTwoFactor(ctx, smsCode, response) error` | `POST /general/connectApiWithTwoFactor` |
+| `Register(ctx, in) error` | `POST /patients/addNewPatient` |
+| `Refresh(ctx) error` | `POST /general/refreshApi` |
+| `Disconnect(ctx) error` | `POST /general/disconnectApi` |
+
+## `Auth.Connect`
+
+`POST /general/connectApi` · public (no bearer token).
+
+```go
+login, err := client.Auth.Connect(ctx, bk.ConnectInput{
+	APIUserName:     "patient@example.com",
+	APIUserPassword: "•••••••",
+	LoginMode:       "email",
+})
+```
+
+`ConnectInput` fields:
+
+| Field             | Type     | Required | Notes |
+|-------------------|----------|:--------:|-------|
+| `APIUserName`     | `string` | ✓        | Identifier per `LoginMode` (email / TC / phone / user id). |
+| `APIUserPassword` | `string` | ✓*       | Required except in `social` / `afterRegister` modes. |
+| `LoginMode`       | `string` | ✓        | `"email"`, `"identity"`, `"phone"`, `"user_id"`, `"social"` or `"afterRegister"`. |
+| `ClientID`        | `string` | —        | Defaults to the client's configured client id. |
+| `ClientSecret`    | `string` | —        | Defaults to the client's configured client secret. |
+| `WithPhoneNumber` | `string` | —        | Some installs require it in `phone` mode. |
+
+`Connect` returns a `*LoginResult` — **always check `TwoFactorRequired`**:
+
+```go
+login, err := client.Auth.Connect(ctx, bk.ConnectInput{
+	APIUserName: apiUserName, APIUserPassword: apiUserPassword, LoginMode: "email",
+})
+if err != nil {
+	log.Fatal(err)
+}
+
+if login.TwoFactorRequired {
+	// login.TwoFactorResponse is an encrypted blob — pass it on with the SMS code.
+} else {
+	// Logged in. Tokens are already stored.
+}
+```
+
+`LoginResult` has two fields:
+
+| Field               | Type     | Notes |
+|---------------------|----------|-------|
+| `TwoFactorRequired` | `bool`   | `true` when SMS two-factor is enabled and no token was minted yet. |
+| `TwoFactorResponse` | `string` | The encrypted blob to forward to `ConnectWithTwoFactor`. |
+
+When SMS two-factor is enabled the response carries no access token; instead it
+returns an encrypted `TwoFactorResponse` blob to forward to `ConnectWithTwoFactor`.
+
+## `Auth.ConnectWithTwoFactor`
+
+`POST /general/connectApiWithTwoFactor` · public.
+
+```go
+err := client.Auth.ConnectWithTwoFactor(ctx, "123456", login.TwoFactorResponse)
+```
+
+The method signature is `ConnectWithTwoFactor(ctx context.Context, smsVerificationCode, response string) error`.
+Tokens are minted during `Connect` and returned (and stored) here. The SDK sends
+only `smsVerificationCode` + `response`.
+
+## `Auth.Register`
+
+`POST /patients/addNewPatient` · public (guarded by SMS verification + throttle).
+
+```go
+err := client.Auth.Register(ctx, bk.RegisterInput{
+	Name:                "Ada",
+	Surname:             "Lovelace",
+	APIUserName:         "+90 555 111 22 33", // same +CC value as PhoneNumber
+	PhoneNumber:         "+90 555 111 22 33",
+	Password:            "•••••••",
+	SMSVerificationCode: "123456",
+	Response:            smsVerifyBlob, // from the prior SMS-verification step
+})
+```
+
+`RegisterInput` fields:
+
+| Field                 | Type     | Required | Notes |
+|-----------------------|----------|:--------:|-------|
+| `Name`                | `string` | ✓        | Patient first name. |
+| `Surname`             | `string` | ✓        | Patient surname. |
+| `APIUserName`         | `string` | ✓        | Should equal `PhoneNumber` (the `+CC` form). |
+| `PhoneNumber`         | `string` | ✓        | Must start with `+` and a country code. |
+| `Password`            | `string` | ✓        | New account password. |
+| `SMSVerificationCode` | `string` | ✓        | From the prior SMS-verification step. |
+| `Response`            | `string` | ✓        | Encrypted blob from the prior SMS-verification step. |
+| `AcceptUserAgreement` | `int`    | —        | Defaults to `1` when left at the zero value. |
+| `ClientID`            | `string` | —        | Defaults to the client's configured client id. |
+| `ClientSecret`        | `string` | —        | Defaults to the client's configured client secret. |
+
+Rules enforced by the API:
+
+- `PhoneNumber` must start with `+` and a country code (e.g. `+90 555 111 22 33`); bare digits are rejected.
+- `APIUserName` should equal `PhoneNumber` (the `+CC` form) — it becomes the `afterRegister` login username.
+- `AcceptUserAgreement` defaults to `1`.
+
+> The SMS-verification step that produces the `Response` blob is **not** part of
+> the SDK surface; obtain `Response` + `SMSVerificationCode` beforehand. On success
+> the patient is created and auto-logged-in (`afterRegister`), so tokens are stored.
+
+## Silent auto-refresh & retry
+
+Every protected call carries the stored access token. If the API answers `401`
+(or `resultType 4`, the refresh signal) and a refresh token is available, the SDK:
+
+1. calls `Auth.Refresh` with the stored refresh token + client credentials,
+2. persists the rotated tokens,
+3. retries the original request **once**.
+
+The retry is bounded to one attempt, and concurrent 401s share a single in-flight
+refresh guarded by a mutex (no refresh stampede). If the refresh fails — or the API
+returns `resultType 2` (logout) — the token store is cleared and an
+[`ErrAuthentication`](/docs/go/v0.x/errors/) `*APIError` is returned.
+
+You rarely need to call `Refresh` yourself, but it is available:
+
+```go
+err := client.Auth.Refresh(ctx) // POST /general/refreshApi
+```
+
+> `Refresh` requires client credentials (`WithCredentials`) on the client and a
+> stored refresh token. It returns an `*APIError` matching `ErrAuthentication` when
+> the refresh fails.
+
+## `Auth.Disconnect`
+
+`POST /general/disconnectApi` · bearer. Revokes the tokens server-side, then clears
+the local token store (even if the network call fails).
+
+```go
+err := client.Auth.Disconnect(ctx)
+```
+
+## Token store
+
+Tokens live in a pluggable `TokenStore`. The default is in-memory (lost on process
+exit). Implement the interface to persist to a file, database or secure storage:
+
+```go
+// TokenStore is the interface to implement.
+type TokenStore interface {
+	AccessToken() string
+	RefreshToken() string
+	SetTokens(access, refresh string)
+	Clear()
+}
+```
+
+An empty string means "no token". Inject your implementation with
+`WithTokenStore`:
+
+```go
+client := bk.NewClient(
+	bk.WithCredentials(clientID, clientSecret),
+	bk.WithTokenStore(myFileStore),
+)
+```
+
+The bundled `InMemoryTokenStore` can be seeded with existing tokens — handy for
+resuming a session:
+
+```go
+store := bk.NewInMemoryTokenStore(accessToken, refreshToken)
+client := bk.NewClient(
+	bk.WithCredentials(clientID, clientSecret),
+	bk.WithTokenStore(store),
+)
+```
+
+`InMemoryTokenStore` is concurrency-safe. The active store is also reachable as
+`client.TokenStore()`.

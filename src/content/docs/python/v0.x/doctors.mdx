@@ -1,0 +1,122 @@
+---
+title: Doctors
+description: List branches and locations, run quick or filtered doctor searches, and fetch doctor details.
+order: 2
+---
+
+# Doctors
+
+`client.doctors` covers discovery: reference lists (branches, locations), two search
+modes, and the full doctor detail. All methods require a logged-in client (bearer token).
+
+| Method | Endpoint |
+|--------|----------|
+| `branches()` | `GET /patients/allBranches` |
+| `locations()` | `GET /patients/allLocations` |
+| `quick_search(search_text, list_type=None, location=None)` | `POST /patients/quickSearch` |
+| `search(*, search_params=None, order_params=None, other_params=None, current_page=1, per_page_limit=20)` | `POST /patients/filteredSearch` |
+| `detail(doctor_id, corporate=None)` | `GET /patients/doctorDetail/{doctor_id}/{corporate?}` |
+
+> Async: each method is awaitable on `AsyncBulutklinikClient` under the same name.
+
+## `branches()` / `locations()`
+
+Reference lists for building search filters. Each returns the unwrapped `data`
+payload (a list).
+
+```python
+branches = client.doctors.branches()
+locations = client.doctors.locations()
+```
+
+## `quick_search(search_text, list_type=None, location=None)`
+
+Typeahead-style search across branches, doctors, companies, treatments and blogs.
+
+```python
+result = client.doctors.quick_search(
+    "kardiyo",         # search_text, 3–100 chars
+    "interview",       # list_type: "interview" | "appointment" | None
+)
+```
+
+`quick_search` parameters:
+
+| Parameter     | Type                | Required | Notes |
+|---------------|---------------------|:--------:|-------|
+| `search_text` | `str` (3–100)       | ✓        | |
+| `list_type`   | `str \| None`       | —        | `"interview"` \| `"appointment"` \| `None`. |
+| `location`    | `str \| None`       | —        | |
+
+The result groups matches into `searchedBranches`, `searchedDoctors`,
+`searchedCompanies`, `searchedGivenTreatments`, `searchedBlogs` and `queryText`.
+
+> On the `test` environment `quick_search` may return a 404 because the search
+> driver (Elasticsearch) is not provisioned there. Use `search` (below) — it is the
+> production search path and works in `test`.
+
+## `search(...)`
+
+Filtered, paginated doctor search. This is the primary search method. All
+parameters are **keyword-only**.
+
+```python
+result = client.doctors.search(
+    search_params={
+        "withFreeText": "kardiyoloji",
+        "withLocationId": 34,
+    },
+    order_params=["slot"],            # "name" | "point" | "slot" | "order"
+    other_params=["isInterviewable"], # "isKizilay" | "isQuestionable" | "isInterviewable" | "isAppointmentable"
+    current_page=1,                   # >= 1
+    per_page_limit=20,                # 10–100, default 20
+)
+found_count = result["foundDoctorsCount"]
+doctors = result["foundDoctors"]
+```
+
+`search` parameters:
+
+| Parameter        | Type                       | Required | Default |
+|------------------|----------------------------|:--------:|---------|
+| `search_params`  | `dict[str, Any] \| None`   | —        | `{}` |
+| `order_params`   | `list[str] \| None`        | —        | `[]` |
+| `other_params`   | `list[str] \| None`        | —        | `[]` |
+| `current_page`   | `int`                      | —        | `1` |
+| `per_page_limit` | `int` (10–100)             | —        | `20` |
+
+`search_params` keys (all optional): `withFreeText`, `withDoctorName`,
+`withBranchName`, `withBranchId` (`-1` excludes psychology/diet), `withLocationName`,
+`withLocationId`, `withCompanyName`, `withCompanyId`, `withGivenTreatments`,
+`withExpertyId`, `withInstitutionId`, `withNearestSlotDayRange`.
+
+The result is a dict `{"foundDoctorsCount": ..., "foundDoctors": [...]}`, where each
+doctor includes `doctor_id`, `name`, `surname`, `branch_name`, `star_rate`,
+`nearest_slot`, `isInterviewable`, `isAppointmentable`, `url`, `user_image` and more.
+The `doctor_id` feeds [Slots](/docs/python/v0.x/slots/) and
+[Appointments](/docs/python/v0.x/appointments/).
+
+> The `search_params` / `order_params` / `other_params` keys are the API's
+> camelCase field names — they are passed through verbatim, so keep them as-is even
+> though the SDK methods themselves are snake_case.
+
+## `detail(doctor_id, corporate=None)`
+
+Full doctor profile. `doctor_id` is the `doctor_id` from a search result;
+`corporate` is optional.
+
+```python
+detail = client.doctors.detail(8282)
+# or scoped to a corporate/clinic context:
+detail2 = client.doctors.detail(8282, corporate_id)
+```
+
+`detail` parameters:
+
+| Parameter   | Type                  | Required | Notes |
+|-------------|-----------------------|:--------:|-------|
+| `doctor_id` | `int \| str`          | ✓        | The `doctor_id` from a search result. |
+| `corporate` | `int \| str \| None`  | —        | Optional corporate/clinic scope. |
+
+The payload includes `doctorGeneralInfo` (prices, session length, branch),
+education, languages, reviews, videos, special services and related clinics.

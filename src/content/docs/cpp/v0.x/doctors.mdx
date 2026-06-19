@@ -1,0 +1,119 @@
+---
+title: Doctors
+description: List branches and locations, run quick or filtered doctor searches, and fetch doctor details.
+order: 2
+---
+
+# Doctors
+
+`client.doctors()` covers discovery: reference lists (branches, locations), two
+search modes, and the full doctor detail. All methods require a logged-in client
+(bearer token) and return an `` `nlohmann::json` ``.
+
+| Method | Endpoint |
+|--------|----------|
+| `branches()`  | `GET /patients/allBranches` |
+| `locations()` | `GET /patients/allLocations` |
+| `quick_search(search_text, list_type?, location?)` | `POST /patients/quickSearch` |
+| `search(input)` | `POST /patients/filteredSearch` |
+| `detail(id, corporate?)` | `GET /patients/doctorDetail/{id}/{corporate?}` |
+
+## `branches()` / `locations()`
+
+Reference lists for building search filters.
+
+```cpp
+auto branches = client.doctors().branches();   // nlohmann::json (array)
+auto locations = client.doctors().locations();  // nlohmann::json (array)
+```
+
+## `quick_search`
+
+Typeahead-style search across branches, doctors, companies, treatments and blogs.
+
+```cpp
+auto result = client.doctors().quick_search(
+    "kardiyo",      // 3–100 chars
+    "interview");   // list_type: "interview" | "appointment" | std::nullopt
+```
+
+Parameters:
+
+| Parameter     | Type                          | Required | Notes |
+|---------------|-------------------------------|:--------:|-------|
+| `search_text` | `std::string` (3–100)         | ✓        | The query text. |
+| `list_type`   | `std::optional<std::string>`  | —        | `"interview"` \| `"appointment"`; omit with `std::nullopt`. |
+| `location`    | `std::optional<std::string>`  | —        | Optional location filter. |
+
+The result groups matches into `searchedBranches`, `searchedDoctors`,
+`searchedCompanies`, `searchedGivenTreatments`, `searchedBlogs` and `queryText`.
+
+> On the `test` environment `quick_search` may return a 404 because the search
+> driver (Elasticsearch) is not provisioned there. Use `search` (below) — it is the
+> production search path and works in `test`.
+
+## `search`
+
+Filtered, paginated doctor search. This is the primary search method. It takes a
+`SearchInput` struct.
+
+```cpp
+bulutklinik::SearchInput input;
+input.search_params = {
+    {"withFreeText", "kardiyoloji"},
+    {"withLocationId", 34},
+};
+input.order_params = {"slot"};            // "name" | "point" | "slot" | "order"
+input.other_params = {"isInterviewable"}; // "isKizilay" | "isQuestionable" | "isInterviewable" | "isAppointmentable"
+input.current_page = 1;                   // >= 1
+input.per_page_limit = 20;                // 10–100, default 20
+
+auto result = client.doctors().search(input);
+auto count = result["foundDoctorsCount"].get<int>();
+auto& doctors = result["foundDoctors"];
+```
+
+`SearchInput` fields:
+
+| Field            | Type                           | Required | Default |
+|------------------|--------------------------------|:--------:|---------|
+| `search_params`  | `nlohmann::json` (object)      | —        | `{}` |
+| `order_params`   | `std::vector<std::string>`     | —        | `{}` |
+| `other_params`   | `std::vector<std::string>`     | —        | `{}` |
+| `current_page`   | `int`                          | —        | `1` |
+| `per_page_limit` | `int` (10–100)                 | —        | `20` |
+
+`search_params` keys (all optional): `withFreeText`, `withDoctorName`,
+`withBranchName`, `withBranchId` (`-1` excludes psychology/diet), `withLocationName`,
+`withLocationId`, `withCompanyName`, `withCompanyId`, `withGivenTreatments`,
+`withExpertyId`, `withInstitutionId`, `withNearestSlotDayRange`.
+
+The result is `{ foundDoctorsCount, foundDoctors }`, where each doctor includes
+`doctor_id`, `name`, `surname`, `branch_name`, `star_rate`, `nearest_slot`,
+`isInterviewable`, `isAppointmentable`, `url`, `user_image` and more. The
+`doctor_id` feeds [Slots](/docs/cpp/v0.x/slots/) and
+[Appointments](/docs/cpp/v0.x/appointments/) — pass it on as a `` `std::string` ``:
+
+```cpp
+std::string doctor_id =
+    std::to_string(result["foundDoctors"][0]["doctor_id"].get<int>());
+```
+
+## `detail`
+
+Full doctor profile. `id` is the `doctor_id` from a search result (as a string);
+`corporate` is optional.
+
+```cpp
+auto detail = client.doctors().detail("8282");
+// or scoped to a corporate/clinic context:
+auto detail2 = client.doctors().detail("8282", corporate_id);
+```
+
+| Parameter   | Type                          | Required | Notes |
+|-------------|-------------------------------|:--------:|-------|
+| `id`        | `std::string`                 | ✓        | The `doctor_id`. |
+| `corporate` | `std::optional<std::string>`  | —        | Optional corporate/clinic scope. |
+
+The payload includes `doctorGeneralInfo` (prices, session length, branch),
+education, languages, reviews, videos, special services and related clinics.

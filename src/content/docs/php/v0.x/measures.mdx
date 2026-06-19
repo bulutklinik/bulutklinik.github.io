@@ -1,0 +1,123 @@
+---
+title: Measures
+description: Submit and read patient health measurements — CRUD, latest values, history lists and graphs.
+order: 6
+---
+
+# Measures
+
+`$client->measures` records and reads patient health measurements (tension, glucose,
+weight, …). Patient endpoints require a bearer token; the partner endpoint uses the
+configured partner token. Records are written to the authenticated patient.
+
+| Method                                          | Endpoint |
+|-------------------------------------------------|----------|
+| `addList(records)`                              | `POST /patients/addNewUserMeasures` |
+| `add(type, fields)`                             | `POST /patients/addNewUserMeasures/{type}` |
+| `update(type, input)`                           | `PUT /patients/updateUserMeasures/{type}` |
+| `delete(type, id)`                              | `DELETE /patients/deleteUserMeasures/{type}` |
+| `last()`                                        | `GET /patients/measuresList` |
+| `list(type, page, glucoseType?)`               | `GET /patients/userMeasuresList/{type}/{page}/{glucoseType?}` |
+| `graph(type, period, page, glucoseType?)`      | `GET /patients/userMeasuresGraph/{type}/{period}/{page}/{glucoseType?}` |
+| `partnerHealthInformation(identity, phoneNumber, data)` | `POST /outher/healthInformation` |
+
+Every measurement record also requires `date_time` as `"Y-m-d H:i"`.
+
+## `addList(records)` — primary entrypoint
+
+Submit one or many measurements (of any types) in a single transaction.
+
+```php
+$client->measures->addList([
+    ['type' => 'tension', 'hypertension' => 120, 'hypotension' => 80, 'date_time' => '2026-06-19 09:00'],
+    ['type' => 'glucose', 'glucose' => 95, 'glucose_type' => 0, 'date_time' => '2026-06-19 09:00'],
+    ['type' => 'weight', 'weight' => 72.5, 'date_time' => '2026-06-19 09:00'],
+]);
+```
+
+`records` is a `list<array<string, mixed>>`.
+
+## `add` / `update` / `delete`
+
+Single-type writes:
+
+```php
+// Add one measurement of a type.
+$client->measures->add('pulse', ['pulse' => 68, 'date_time' => '2026-06-19 09:00']);
+
+// Update an existing record (id required).
+$client->measures->update('pulse', ['id' => 1234, 'pulse' => 70, 'date_time' => '2026-06-19 09:00']);
+
+// Delete a record (id required).
+$client->measures->delete('pulse', 1234);
+```
+
+`add` / `update` take a `string $type` plus an associative array of fields;
+`delete` takes a `string $type` and an `int|string $id`.
+
+## Reading measurements
+
+```php
+// Latest value of every type.
+$latest = $client->measures->last();
+
+// Paginated history for one type (page is 1-based).
+$history = $client->measures->list('weight', 1);
+
+// Glucose splits by glucoseType (0 = fasting, 1 = postprandial).
+$glucose = $client->measures->list('glucose', 1, 0);
+
+// Grouped graph data. period: 1=day, 2=week, 3=month, 4=year.
+$graph = $client->measures->graph('tension', 3, 1);
+```
+
+`last()` returns the most recent of each type as an array. Tension splits into
+`hypertension` / `hypotension` and glucose into `hunger_glucose` /
+`postprandial_glucose`, each with a `*Date`. For `list`, `page` is `int|string` and
+`glucoseType` is `?int`; for `graph`, `period` is `int`, `page` is `int|string` and
+`glucoseType` is `?int`.
+
+## Measure types
+
+| `type`    | Fields |
+|-----------|--------|
+| `tension` | `hypertension` (systolic), `hypotension` (diastolic) |
+| `glucose` | `glucose`, `glucose_type` (0 = fasting, 1 = postprandial) |
+| `pulse`   | `pulse` |
+| `fever`   | `fever` |
+| `weight`  | `weight` (BMI auto-computed) |
+| `length`  | `length` (BMI auto-computed) |
+| `waist`   | `waist` |
+| `hip`     | `hip` |
+| `fat`     | `fat` |
+| `muscle`  | `muscle` |
+| `calorie` | `calorie` |
+| `step`    | `step` |
+| `sleep`   | `sleep` (hours; stored to `sleep_time`) |
+
+Values are numeric; `tension` / `pulse` are 1–10 digits, `glucose` is `0–99999.99`
+and requires `glucose_type` (`0` \| `1`), and `weight` / `length` are `0–99999.99`.
+
+## Partner submission
+
+`partnerHealthInformation` uses the partner (`teusan`) token configured via
+`partnerToken`, not the patient access token.
+
+```php
+$partnerClient = new BulutklinikClient(new ClientConfig(partnerToken: '…'));
+
+$partnerClient->measures->partnerHealthInformation(
+    identity: '12345678901',
+    phoneNumber: '+90 555 111 22 33',
+    data: [
+        ['type' => 'tension', 'hypertension' => 120, 'hypotension' => 80, 'date_time' => '2026-06-19 09:00'],
+    ],
+);
+```
+
+`partnerHealthInformation` parameters: `?string $identity`, `?string $phoneNumber`,
+and `list<array<string, mixed>> $data`.
+
+> Known API behaviour: the partner endpoint has a server-side bug where `identity`
+> is nulled during validation, so matching falls back to `phoneNumber`. The SDK
+> sends the correct contract (`identity` + `phoneNumber`); send both.

@@ -1,0 +1,127 @@
+---
+title: Measures
+description: Submit and read patient health measurements — CRUD, latest values, history lists and graphs.
+order: 6
+---
+
+# Measures
+
+`client.measures()` records and reads patient health measurements (tension, glucose,
+weight, …). Patient endpoints require a bearer token; the partner endpoint uses the
+configured partner token. Records are written to the authenticated patient. Every
+method returns an `` `nlohmann::json` ``.
+
+| Method | Endpoint |
+|--------|----------|
+| `add_list(records)` | `POST /patients/addNewUserMeasures` |
+| `add(measure_type, fields)` | `POST /patients/addNewUserMeasures/{type}` |
+| `update(measure_type, fields)` | `PUT /patients/updateUserMeasures/{type}` |
+| `delete_measure(measure_type, id)` | `DELETE /patients/deleteUserMeasures/{type}` |
+| `last()` | `GET /patients/measuresList` |
+| `list(measure_type, page, glucose_type?)` | `GET /patients/userMeasuresList/{type}/{page}/{glucoseType?}` |
+| `graph(measure_type, period, page, glucose_type?)` | `GET /patients/userMeasuresGraph/{type}/{period}/{page}/{glucoseType?}` |
+| `partner_health_information(identity, phone_number, data)` | `POST /outher/healthInformation` |
+
+> `delete_measure` is named to avoid the C++ keyword `delete`.
+
+Every measurement record also requires `date_time` as `"Y-m-d H:i"`.
+
+## `add_list(records)` — primary entrypoint
+
+Submit one or many measurements (of any types) in a single transaction. Each record
+is an `` `nlohmann::json` `` object.
+
+```cpp
+std::vector<nlohmann::json> records = {
+    {{"type", "tension"}, {"hypertension", 120}, {"hypotension", 80}, {"date_time", "2026-06-19 09:00"}},
+    {{"type", "glucose"}, {"glucose", 95}, {"glucose_type", 0}, {"date_time", "2026-06-19 09:00"}},
+    {{"type", "weight"}, {"weight", 72.5}, {"date_time", "2026-06-19 09:00"}},
+};
+client.measures().add_list(records);
+```
+
+## `add` / `update` / `delete_measure`
+
+Single-type writes. `fields` is an `` `nlohmann::json` `` object; `id` for
+`delete_measure` is a `` `std::string` ``.
+
+```cpp
+// Add one measurement of a type.
+client.measures().add("pulse",
+    {{"pulse", 68}, {"date_time", "2026-06-19 09:00"}});
+
+// Update an existing record (id required in the fields).
+client.measures().update("pulse",
+    {{"id", 1234}, {"pulse", 70}, {"date_time", "2026-06-19 09:00"}});
+
+// Delete a record (id required, as a string).
+client.measures().delete_measure("pulse", "1234");
+```
+
+## Reading measurements
+
+`page` is a `` `std::string` `` (1-based); `glucose_type` is an
+`` `std::optional<int>` `` (only meaningful for `glucose`).
+
+```cpp
+// Latest value of every type.
+auto latest = client.measures().last();
+
+// Paginated history for one type (page is 1-based).
+auto history = client.measures().list("weight", "1");
+
+// Glucose splits by glucose_type (0 = fasting, 1 = postprandial).
+auto glucose = client.measures().list("glucose", "1", 0);
+
+// Grouped graph data. period: 1=day, 2=week, 3=month, 4=year.
+auto graph = client.measures().graph("tension", 3, "1");
+```
+
+`last()` returns the most recent of each type. Tension splits into
+`hypertension` / `hypotension` and glucose into `hunger_glucose` /
+`postprandial_glucose`, each with a `*Date`.
+
+## Measure types
+
+| `type`    | Fields |
+|-----------|--------|
+| `tension` | `hypertension` (systolic), `hypotension` (diastolic) |
+| `glucose` | `glucose`, `glucose_type` (0 = fasting, 1 = postprandial) |
+| `pulse`   | `pulse` |
+| `fever`   | `fever` |
+| `weight`  | `weight` (BMI auto-computed) |
+| `length`  | `length` (BMI auto-computed) |
+| `waist`   | `waist` |
+| `hip`     | `hip` |
+| `fat`     | `fat` |
+| `muscle`  | `muscle` |
+| `calorie` | `calorie` |
+| `step`    | `step` |
+| `sleep`   | `sleep` (hours; stored to `sleep_time`) |
+
+Values are numeric; `tension` / `pulse` are 1–10 digits, `glucose` is `0–99999.99`
+and requires `glucose_type`, weights/lengths are `0–99999.99`.
+
+## Partner submission
+
+`partner_health_information` uses the partner (`teusan`) token configured via
+`partner_token`, not the patient access token. `identity` and `phone_number` are
+`` `std::optional<std::string>` `` and `data` is a `std::vector<nlohmann::json>`.
+
+```cpp
+bulutklinik::ClientOptions partner_options;
+partner_options.partner_token = "…";
+bulutklinik::Client partner_client(partner_options);
+
+std::vector<nlohmann::json> data = {
+    {{"type", "tension"}, {"hypertension", 120}, {"hypotension", 80}, {"date_time", "2026-06-19 09:00"}},
+};
+partner_client.measures().partner_health_information(
+    std::string("12345678901"),       // identity
+    std::string("+90 555 111 22 33"),  // phone_number
+    data);
+```
+
+> Known API behaviour: the partner endpoint has a server-side bug where `identity`
+> is nulled during validation, so matching falls back to `phoneNumber`. The SDK
+> sends the correct contract (`identity` + `phoneNumber`); send both.

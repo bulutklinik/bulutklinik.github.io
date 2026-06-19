@@ -1,0 +1,67 @@
+---
+title: Appointments
+description: Reserve online interviews, create physical appointments, and cancel by event id.
+order: 4
+---
+
+# Appointments
+
+`client.appointments` books and cancels appointments. All methods require a bearer
+token and return a Jackson `JsonNode`. The server resolves the slot from `doctorId`
++ `appointmentDate` — there is no `slotId` in the request.
+
+| Method                                         | Endpoint |
+|------------------------------------------------|----------|
+| `reserveInterview(doctorId, appointmentDate)`  | `POST /patients/addInterviewDateReservation` |
+| `reserveInterview(doctorId, appointmentDate, appointmentType)` | `POST /patients/addInterviewDateReservation` |
+| `addPhysical(doctorId, appointmentDate)`       | `POST /patients/addNewAppointment` |
+| `cancel(eventId)`                              | `DELETE /patients/deleteUserAppointment/{eventId}` |
+
+## `reserveInterview(...)`
+
+Reserve an online (interview) slot. On success the API responds `resultType 0`,
+`data: null`, so the SDK returns a JSON null node.
+
+```java
+client.appointments.reserveInterview(8282, "2026-06-20 14:30"); // "yyyy-MM-dd HH:mm", today..+21
+```
+
+There are two overloads — the short form defaults `appointmentType` to
+`"interview"`:
+
+```java
+JsonNode reserveInterview(Object doctorId, String appointmentDate);
+JsonNode reserveInterview(Object doctorId, String appointmentDate, String appointmentType);
+```
+
+`reserveInterview` parameters:
+
+| Parameter         | Type     | Required | Default       | Notes |
+|-------------------|----------|:--------:|---------------|-------|
+| `doctorId`        | `Object` | ✓        | —             | `int`, `Integer` or `String`. |
+| `appointmentDate` | `String` | ✓        | —             | `yyyy-MM-dd HH:mm`, today..+21. |
+| `appointmentType` | `String` | —        | `"interview"` | `"interview"` \| `"appointment"`. `null` falls back to `"interview"`. |
+
+A successful reservation returns a JSON null node. Conflicts and validation failures
+throw a typed [exception](/docs/java/v0.x/errors/).
+
+## `addPhysical(doctorId, appointmentDate)`
+
+Create an in-person (physical) appointment. No `appointmentType`.
+
+```java
+client.appointments.addPhysical(8282, "2026-06-20 14:30"); // "yyyy-MM-dd HH:mm"
+```
+
+## `cancel(eventId)`
+
+Cancel an appointment by its event id (`cln_events.id`). `eventId` is typed as
+`Object`.
+
+```java
+client.appointments.cancel(eventId);
+```
+
+> Cancellation can be rejected (server-side) for insurance appointments, once the
+> cancel window has passed, or if the event is not found — these surface as a typed
+> exception.

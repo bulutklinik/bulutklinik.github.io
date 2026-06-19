@@ -1,0 +1,72 @@
+---
+title: Appointments
+description: Reserve online interviews, create physical appointments, and cancel by event id.
+order: 4
+---
+
+# Appointments
+
+`client.Appointments` books and cancels appointments. All methods require a bearer
+token and return a `Task<JsonElement>`. The server resolves the slot from
+`doctorId` + `appointmentDate` — there is no `slotId` in the request.
+
+| Method                     | Endpoint |
+|----------------------------|----------|
+| `ReserveInterviewAsync(doctorId, appointmentDate, appointmentType?)`  | `POST /patients/addInterviewDateReservation` |
+| `AddPhysicalAsync(doctorId, appointmentDate)`       | `POST /patients/addNewAppointment` |
+| `CancelAsync(eventId)`          | `DELETE /patients/deleteUserAppointment/{eventId}` |
+
+## `ReserveInterviewAsync`
+
+Reserve an online (interview) slot.
+
+```csharp
+await client.Appointments.ReserveInterviewAsync(
+    8282,
+    "2026-06-20 14:30"); // "yyyy-MM-dd HH:mm", today..+21
+```
+
+The full signature:
+
+```csharp
+Task<JsonElement> ReserveInterviewAsync(
+    object doctorId,
+    string appointmentDate,
+    string appointmentType = "interview",
+    CancellationToken cancellationToken = default);
+```
+
+| Parameter         | Type     | Required | Default |
+|-------------------|----------|:--------:|---------|
+| `doctorId`        | `object` | ✓        | — |
+| `appointmentDate` | `string` (`yyyy-MM-dd HH:mm`) | ✓ | — |
+| `appointmentType` | `string` | —        | `"interview"` |
+
+A successful reservation responds `resultType 0` with `data: null`; the returned
+`JsonElement` is therefore `JsonValueKind.Null`. Conflicts and validation failures
+throw a typed [exception](/docs/csharp/v0.x/errors/).
+
+## `AddPhysicalAsync`
+
+Create an in-person (physical) appointment. No `appointmentType`.
+
+```csharp
+await client.Appointments.AddPhysicalAsync(
+    8282,
+    "2026-06-20 14:30"); // "yyyy-MM-dd HH:mm"
+```
+
+The signature is `Task<JsonElement> AddPhysicalAsync(object doctorId, string appointmentDate, CancellationToken cancellationToken = default)`.
+
+## `CancelAsync`
+
+Cancel an appointment by its event id (`cln_events.id`). The id is typed as
+`object`, so an `int`, `long` or `string` all work.
+
+```csharp
+await client.Appointments.CancelAsync(eventId);
+```
+
+> Cancellation can be rejected (server-side) for insurance appointments, once the
+> cancel window has passed, or if the event is not found — these surface as a typed
+> exception.

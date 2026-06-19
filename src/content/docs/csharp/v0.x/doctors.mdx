@@ -1,0 +1,119 @@
+---
+title: Doctors
+description: List branches and locations, run quick or filtered doctor searches, and fetch doctor details.
+order: 2
+---
+
+# Doctors
+
+`client.Doctors` covers discovery: reference lists (branches, locations), two search
+modes, and the full doctor detail. All methods require a logged-in client (bearer
+token) and return a `Task<JsonElement>`.
+
+| Method        | Endpoint |
+|---------------|----------|
+| `BranchesAsync()`  | `GET /patients/allBranches` |
+| `LocationsAsync()` | `GET /patients/allLocations` |
+| `QuickSearchAsync(searchText, listType?, location?)` | `POST /patients/quickSearch` |
+| `SearchAsync(input)`      | `POST /patients/filteredSearch` |
+| `DetailAsync(id, corporate?)` | `GET /patients/doctorDetail/{id}/{corporate?}` |
+
+## `BranchesAsync()` / `LocationsAsync()`
+
+Reference lists for building search filters.
+
+```csharp
+var branches = await client.Doctors.BranchesAsync();   // JsonElement (array)
+var locations = await client.Doctors.LocationsAsync(); // JsonElement (array)
+```
+
+## `QuickSearchAsync(searchText, listType?, location?)`
+
+Typeahead-style search across branches, doctors, companies, treatments and blogs.
+
+```csharp
+var result = await client.Doctors.QuickSearchAsync(
+    "kardiyo",      // 3–100 chars
+    "interview");   // "interview" | "appointment" | null
+```
+
+The signature:
+
+```csharp
+Task<JsonElement> QuickSearchAsync(
+    string searchText,
+    string? listType = null,
+    string? location = null,
+    CancellationToken cancellationToken = default);
+```
+
+| Parameter    | Type      | Required | Notes |
+|--------------|-----------|:--------:|-------|
+| `searchText` | `string`  | ✓        | 3–100 chars. |
+| `listType`   | `string?` | —        | `"interview"`, `"appointment"` or `null`. |
+| `location`   | `string?` | —        | Optional location filter. |
+
+The result groups matches into `searchedBranches`, `searchedDoctors`,
+`searchedCompanies`, `searchedGivenTreatments`, `searchedBlogs` and `queryText`.
+
+> On the `Test` environment `QuickSearchAsync` may return a 404 because the search
+> driver (Elasticsearch) is not provisioned there. Use `SearchAsync` (below) — it is
+> the production search path and works in `Test`.
+
+## `SearchAsync(input)`
+
+Filtered, paginated doctor search. This is the primary search method.
+
+```csharp
+var result = await client.Doctors.SearchAsync(new SearchInput
+{
+    SearchParams = new Dictionary<string, object?>
+    {
+        ["withFreeText"] = "kardiyoloji",
+        ["withLocationId"] = 34,
+    },
+    OrderParams = new[] { "slot" },             // "name" | "point" | "slot" | "order"
+    OtherParams = new[] { "isInterviewable" },  // "isKizilay" | "isQuestionable" | "isInterviewable" | "isAppointmentable"
+    CurrentPage = 1,                            // >= 1
+    PerPageLimit = 20,                          // 10–100, default 20
+});
+
+int count = result.GetProperty("foundDoctorsCount").GetInt32();
+int doctorId = result.GetProperty("foundDoctors")[0].GetProperty("doctor_id").GetInt32();
+```
+
+`SearchInput`:
+
+| Field          | Type                             | Required | Default |
+|----------------|----------------------------------|:--------:|---------|
+| `SearchParams` | `IDictionary<string, object?>?`  | —        | `{}` |
+| `OrderParams`  | `IReadOnlyList<string>?`         | —        | `[]` |
+| `OtherParams`  | `IReadOnlyList<string>?`         | —        | `[]` |
+| `CurrentPage`  | `int`                            | —        | `1` |
+| `PerPageLimit` | `int` (10–100)                   | —        | `20` |
+
+`SearchParams` keys (all optional): `withFreeText`, `withDoctorName`,
+`withBranchName`, `withBranchId` (`-1` excludes psychology/diet), `withLocationName`,
+`withLocationId`, `withCompanyName`, `withCompanyId`, `withGivenTreatments`,
+`withExpertyId`, `withInstitutionId`, `withNearestSlotDayRange`.
+
+The result is an object with `foundDoctorsCount` and `foundDoctors`, where each
+doctor includes `doctor_id`, `name`, `surname`, `branch_name`, `star_rate`,
+`nearest_slot`, `isInterviewable`, `isAppointmentable`, `url`, `user_image` and
+more. The `doctor_id` feeds [Slots](/docs/csharp/v0.x/slots/) and
+[Appointments](/docs/csharp/v0.x/appointments/).
+
+## `DetailAsync(id, corporate?)`
+
+Full doctor profile. `id` is the `doctor_id` from a search result; `corporate` is
+optional. Both are typed as `object` so you can pass an `int`, `long` or `string`.
+
+```csharp
+var detail = await client.Doctors.DetailAsync(8282);
+// or scoped to a corporate/clinic context:
+var detail2 = await client.Doctors.DetailAsync(8282, corporateId);
+```
+
+The signature is `Task<JsonElement> DetailAsync(object id, object? corporate = null, CancellationToken cancellationToken = default)`.
+The payload includes `doctorGeneralInfo` (prices, session length, branch),
+education, languages, reviews, videos, special services and related clinics.

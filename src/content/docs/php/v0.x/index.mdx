@@ -1,0 +1,129 @@
+---
+title: Overview
+description: Install the Bulutklinik PHP SDK and make your first authenticated API call.
+order: 0
+---
+
+# PHP SDK
+
+The official Bulutklinik API SDK for PHP. It is hand-written, fully typed, and
+framework-agnostic — built on PSR-18 / PSR-17 so you bring your own HTTP client
+(auto-discovered via `php-http/discovery`). Requires PHP 8.2+.
+
+It covers the patient flow end to end: **authentication, doctor search, availability
+slots, appointments, payments (3-D Secure) and health measures** — 6 service groups
+over 27 endpoints.
+
+- **Package:** [`bulutklinik/sdk`](https://packagist.org/packages/bulutklinik/sdk) on Packagist
+- **Source:** [github.com/bulutklinik/php-sdk](https://github.com/bulutklinik/php-sdk)
+- **Spec version:** 0.1.0 (API v3)
+
+## Install
+
+```bash
+composer require bulutklinik/sdk
+```
+
+You also need any PSR-18 client plus PSR-17 factories. They are auto-discovered
+via `php-http/discovery`. If you don't have one yet, install Guzzle:
+
+```bash
+composer require guzzlehttp/guzzle
+```
+
+The transport pieces are injectable, so you can swap in any PSR-18 implementation
+without touching the SDK.
+
+## Quick start
+
+Construct the client once and reuse it; each service group is exposed as a readonly property.
+
+```php
+<?php
+
+use Bulutklinik\Sdk\BulutklinikClient;
+use Bulutklinik\Sdk\ClientConfig;
+use Bulutklinik\Sdk\Environment;
+
+$client = new BulutklinikClient(new ClientConfig(
+    environment: Environment::Production, // Production | Test | Local
+    clientId: 'your-oauth-client-id',
+    clientSecret: 'your-oauth-client-secret',
+));
+
+// 1) Log in — tokens are stored automatically.
+$login = $client->auth->connect('patient@example.com', '•••••••', 'email');
+
+if ($login->twoFactorRequired) {
+    $client->auth->connectWithTwoFactor('123456', $login->twoFactorResponse);
+}
+
+// 2) Search for a doctor.
+$result = $client->doctors->search(
+    searchParams: ['withFreeText' => 'kardiyoloji'],
+    orderParams: ['slot'],
+    currentPage: 1,
+);
+$doctorId = $result['foundDoctors'][0]['doctor_id'];
+
+// 3) Read the doctor's free slots.
+$schedule = $client->slots->schedule($doctorId, 'interview');
+
+// 4) Reserve an online appointment ("Y-m-d H:i").
+$client->appointments->reserveInterview($doctorId, '2026-06-20 14:30');
+```
+
+Every data method returns the unwrapped `data` payload from the response envelope
+as a PHP array (see [Errors & responses](/docs/php/v0.x/errors/)); failures throw a
+typed exception.
+
+## Client configuration
+
+`new BulutklinikClient(?ClientConfig $config = null)` — pass a `ClientConfig`, whose
+constructor accepts these named arguments (all optional):
+
+| Option           | Type                       | Default                  | Purpose |
+|------------------|----------------------------|--------------------------|---------|
+| `environment`    | `Environment`              | `Environment::Production`| Named base-URL preset. Ignored when `baseUrl` is set. |
+| `baseUrl`        | `?string`                  | `null`                   | Explicit base URL; overrides `environment`. |
+| `lang`           | `string`                   | `'tr'`                   | `lang` header sent with every request (`tr` \| `en` \| `de` \| `az`). |
+| `clientId`       | `?string`                  | `null`                   | OAuth client id (used by `connect` and token refresh). |
+| `clientSecret`   | `?string`                  | `null`                   | OAuth client secret. |
+| `partnerToken`   | `?string`                  | `null`                   | Bearer token for the partner (`teusan`) measures endpoint. |
+| `tokenStore`     | `?TokenStore`              | in-memory                | Pluggable token persistence (see [Authentication](/docs/php/v0.x/authentication/)). |
+| `httpClient`     | `?Psr\Http\Client\ClientInterface` | auto-discovered  | Injectable PSR-18 client. Per-request timeouts are a property of this client. |
+| `requestFactory` | `?Psr\Http\Message\RequestFactoryInterface` | auto-discovered | Injectable PSR-17 request factory. |
+| `streamFactory`  | `?Psr\Http\Message\StreamFactoryInterface`  | auto-discovered | Injectable PSR-17 stream factory. |
+
+> `ClientConfig` is immutable (all properties are `readonly`). There is no
+> `timeout` option — configure timeouts on the PSR-18 client you inject as
+> `httpClient`.
+
+### Environments
+
+| Environment            | Base URL |
+|------------------------|----------|
+| `Environment::Production` | `https://api.bulutklinik.com/api/v3` |
+| `Environment::Test`       | `https://apitest.bulutklinik.com/api/v3` |
+| `Environment::Local`      | `https://api-bulutklinik.test/api/v3` |
+
+`Environment` is a backed string enum; `Environment::Production->baseUrl()` returns
+the preset URL directly if you need it.
+
+## Service groups
+
+| Property                  | Covered in |
+|---------------------------|------------|
+| `$client->auth`           | [Authentication](/docs/php/v0.x/authentication/) |
+| `$client->doctors`        | [Doctors](/docs/php/v0.x/doctors/) |
+| `$client->slots`          | [Slots](/docs/php/v0.x/slots/) |
+| `$client->appointments`   | [Appointments](/docs/php/v0.x/appointments/) |
+| `$client->payments`       | [Payments](/docs/php/v0.x/payments/) |
+| `$client->measures`       | [Measures](/docs/php/v0.x/measures/) |
+
+## Types
+
+The SDK is fully typed against PHP 8.2 and ships PHPStan-level-6 annotations.
+Resource methods take named arguments (e.g. `searchParams:`, `orderParams:`) and
+typed scalars; data methods return `array` payloads. The full error hierarchy lives
+under `Bulutklinik\Sdk\Exception\*`.
