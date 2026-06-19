@@ -133,6 +133,30 @@ Set `base_url` to point at any other host; it takes precedence over `environment
 | `client.payments()`       | [Payments](/docs/cpp/v0.x/payments/) |
 | `client.measures()`       | [Measures](/docs/cpp/v0.x/measures/) |
 
+## Escape hatch: uncovered endpoints
+
+The six service groups cover every endpoint with a typed method. For an endpoint
+the SDK does not wrap yet, `client.request()` calls any path through the same
+transport, so default headers, the chosen `auth` mode (`Auth::Bearer` by default),
+silent token refresh + retry, envelope unwrapping and the typed error hierarchy
+all still apply. It returns the unwrapped `data` payload as an `` `nlohmann::json` ``.
+
+```cpp
+auto branches = client.request("GET", "/patients/allBranches");
+auto created = client.request("POST", "/patients/someNewEndpoint",
+                              {bulutklinik::Auth::Bearer, {{"foo", "bar"}}});
+```
+
+The optional third argument is a `RequestOptions`:
+
+| Field  | Type                           | Default        | Purpose |
+|--------|--------------------------------|----------------|---------|
+| `auth` | `Auth`                         | `Auth::Bearer` | `Auth::Public` / `Auth::Bearer` / `Auth::Partner`. |
+| `body` | `` `nlohmann::json` ``         | `null`         | Optional JSON payload (`null` means no body). |
+| `lang` | `` `std::optional<std::string>` `` | client default | Per-request `lang` override. |
+
+Prefer a typed resource method when one exists; reach for `request` only for the gaps.
+
 ## Types & idioms
 
 Request inputs are plain structs (`SearchInput`, `PaymentInput`, `CardInfo`,

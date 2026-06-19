@@ -120,6 +120,29 @@ the preset URL directly if you need it.
 | `$client->payments`       | [Payments](/docs/php/v0.x/payments/) |
 | `$client->measures`       | [Measures](/docs/php/v0.x/measures/) |
 
+## Escape hatch: uncovered endpoints
+
+The six service groups cover every endpoint with a typed method. For an endpoint
+the SDK does not wrap yet, `$client->request()` calls any path through the same
+transport, so default headers, the chosen `$auth` mode (`bearer` by default),
+silent token refresh + retry, envelope unwrapping and the typed exception
+hierarchy all still apply. It returns the unwrapped `data` payload.
+
+```php
+$branches = $client->request('GET', '/patients/allBranches');
+$created = $client->request('POST', '/patients/someNewEndpoint', 'bearer', ['foo' => 'bar']);
+```
+
+| Parameter | Type                         | Default    | Purpose |
+|-----------|------------------------------|------------|---------|
+| `$method` | `string`                     | —          | `GET` / `POST` / `PUT` / `DELETE`. |
+| `$path`   | `string`                     | —          | Path relative to the base URL, e.g. `/patients/allBranches`. |
+| `$auth`   | `string`                     | `'bearer'` | `public` / `bearer` / `partner`. |
+| `$body`   | `array<string, mixed>\|null` | `null`     | Optional JSON payload; omitted on `GET`. |
+| `$lang`   | `string\|null`               | `null`     | Per-request `lang` override. |
+
+Prefer a typed resource method when one exists; reach for `request` only for the gaps.
+
 ## Types
 
 The SDK is fully typed against PHP 8.2 and ships PHPStan-level-6 annotations.

@@ -141,6 +141,33 @@ The active store is reachable as `client.token_store`. The sync client closes vi
 | `client.payments`      | [Payments](/docs/python/v0.x/payments/) |
 | `client.measures`      | [Measures](/docs/python/v0.x/measures/) |
 
+## Escape hatch: uncovered endpoints
+
+The six service groups cover every endpoint with a typed method. For an endpoint
+the SDK does not wrap yet, `request()` calls any path through the same transport,
+so default headers, the chosen `auth` mode (`"bearer"` by default), silent token
+refresh + retry, envelope unwrapping and the typed error hierarchy all still
+apply. It returns the unwrapped `data` payload. The method exists on both the sync
+and async clients.
+
+```python
+# Sync.
+branches = client.request("GET", "/patients/allBranches")
+created = client.request("POST", "/patients/someNewEndpoint", body={"foo": "bar"})
+
+# Async.
+branches = await client.request("GET", "/patients/allBranches")
+```
+
+| Parameter | Type                                | Default    | Purpose |
+|-----------|-------------------------------------|------------|---------|
+| `method`  | `str`                               | —          | `"GET"` / `"POST"` / `"PUT"` / `"DELETE"`. |
+| `path`    | `str`                               | —          | Path relative to the base URL, e.g. `"/patients/allBranches"`. |
+| `auth`    | `"public" \| "bearer" \| "partner"` | `"bearer"` | Authentication mode (keyword-only). |
+| `body`    | `dict[str, Any] \| None`            | `None`     | Optional JSON payload (keyword-only); omitted on `GET`. |
+
+Prefer a typed resource method when one exists; reach for `request` only for the gaps.
+
 ## Typing
 
 The package ships `py.typed`, so mypy / Pyright resolve the public API out of the

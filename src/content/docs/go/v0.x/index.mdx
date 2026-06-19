@@ -147,6 +147,35 @@ and `bk.Local`.
 | `client.Payments`       | [Payments](/docs/go/v0.x/payments/) |
 | `client.Measures`       | [Measures](/docs/go/v0.x/measures/) |
 
+## Escape hatch: uncovered endpoints
+
+The six service groups cover every endpoint with a typed method. For an endpoint
+the SDK does not wrap yet, `client.Do` calls any path through the same transport,
+so default headers, the chosen auth mode (`bearer` by default), silent token
+refresh + retry, envelope unwrapping and the typed error hierarchy all still
+apply. It returns the unwrapped `data` payload as a `json.RawMessage` — unmarshal
+it into your own type.
+
+```go
+// Bearer GET with no body — pass nil opts.
+raw, err := client.Do(ctx, "GET", "/patients/allBranches", nil)
+
+// POST a JSON body.
+raw, err = client.Do(ctx, "POST", "/patients/someNewEndpoint", &bk.RequestOptions{
+    Body: map[string]any{"foo": "bar"},
+})
+```
+
+`RequestOptions` fields (pass `nil` for the defaults):
+
+| Field  | Type     | Default        | Purpose |
+|--------|----------|----------------|---------|
+| `Auth` | `string` | `bearer`       | `"public"` / `"bearer"` / `"partner"`. |
+| `Body` | `any`    | —              | Optional JSON payload; ignored on `GET`. |
+| `Lang` | `string` | client default | Per-request `lang` override. |
+
+Prefer a typed resource method when one exists; reach for `Do` only for the gaps.
+
 ## Idioms
 
 The SDK follows idiomatic Go: exported methods are `PascalCase`, every call takes

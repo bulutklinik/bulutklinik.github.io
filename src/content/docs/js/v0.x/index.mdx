@@ -116,6 +116,38 @@ The preset URLs are also exported as `ENVIRONMENT_BASE_URLS` if you need them di
 | `client.payments`      | [Payments](/docs/js/v0.x/payments/) |
 | `client.measures`      | [Measures](/docs/js/v0.x/measures/) |
 
+## Escape hatch: uncovered endpoints
+
+The six service groups cover every endpoint with a typed method. For an endpoint
+the SDK does not wrap yet, `client.request()` calls **any** path through the same
+transport, so default headers, the chosen `auth` mode (`bearer` by default),
+silent token refresh + retry, envelope unwrapping and typed errors all still
+apply. It returns the unwrapped `data` payload — pass a type parameter to shape it.
+
+```ts
+// GET with the default "bearer" auth.
+const branches = await client.request({ method: "GET", path: "/patients/allBranches" });
+
+// POST a JSON body and type the unwrapped `data`.
+const created = await client.request<{ id: number }>({
+  method: "POST",
+  path: "/patients/someNewEndpoint",
+  body: { foo: "bar" },
+});
+```
+
+The single argument is a spec object:
+
+| Field    | Type                                   | Default        | Purpose |
+|----------|----------------------------------------|----------------|---------|
+| `method` | `"GET" \| "POST" \| "PUT" \| "DELETE"` | —              | HTTP method. |
+| `path`   | `string`                               | —              | Path relative to the base URL, e.g. `/patients/allBranches`. |
+| `auth`   | `"public" \| "bearer" \| "partner"`    | `"bearer"`     | Authentication mode. |
+| `body`   | `unknown`                              | —              | Optional JSON payload; omitted on `GET`. |
+| `lang`   | `"tr" \| "en" \| "de" \| "az"`         | client default | Per-request `lang` override. |
+
+Prefer a typed resource method when one exists; reach for `request` only for the gaps.
+
 ## TypeScript
 
 The SDK is written in TypeScript and exports all request/response types and the

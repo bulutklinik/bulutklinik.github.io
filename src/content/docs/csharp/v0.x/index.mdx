@@ -114,6 +114,31 @@ members; the default is `Production`.
 | `client.Payments`      | [Payments](/docs/csharp/v0.x/payments/) |
 | `client.Measures`      | [Measures](/docs/csharp/v0.x/measures/) |
 
+## Escape hatch: uncovered endpoints
+
+The six service groups cover every endpoint with a typed method. For an endpoint
+the SDK does not wrap yet, `client.RequestAsync` calls any path through the same
+transport, so default headers, the chosen `auth` mode (`bearer` by default),
+silent token refresh + retry, envelope unwrapping and the typed exception
+hierarchy all still apply. It returns the unwrapped `data` payload as a
+`JsonElement`.
+
+```csharp
+var branches = await client.RequestAsync(HttpMethod.Get, "/patients/allBranches");
+var created = await client.RequestAsync(HttpMethod.Post, "/patients/someNewEndpoint",
+    body: new { foo = "bar" });
+```
+
+| Parameter           | Type                | Default    | Purpose |
+|---------------------|---------------------|------------|---------|
+| `method`            | `HttpMethod`        | —          | `Get` / `Post` / `Put` / `Delete`. |
+| `path`              | `string`            | —          | Path relative to the base URL, leading slash included. |
+| `auth`              | `string`            | `"bearer"` | `"public"` / `"bearer"` / `"partner"` (case-insensitive; blank/unknown → bearer). |
+| `body`              | `object?`           | `null`     | Optional JSON payload; omitted on `GET`. |
+| `cancellationToken` | `CancellationToken` | `default`  | Cancellation token. |
+
+Prefer a typed resource method when one exists; reach for `RequestAsync` only for the gaps.
+
 ## Working with JsonElement
 
 Data methods return `System.Text.Json.JsonElement`, so you read fields with the

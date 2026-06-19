@@ -117,6 +117,33 @@ Each preset URL is reachable directly via `Environment.PRODUCTION.baseUrl()`.
 | `client.payments`      | [Payments](/docs/java/v0.x/payments/) |
 | `client.measures`      | [Measures](/docs/java/v0.x/measures/) |
 
+## Escape hatch: uncovered endpoints
+
+The six service groups cover every endpoint with a typed method. For an endpoint
+the SDK does not wrap yet, `client.request()` calls any path through the same
+transport, so default headers, the chosen `auth` mode (`bearer` by default),
+silent token refresh + retry, envelope unwrapping and the typed exception
+hierarchy all still apply. It returns the unwrapped `data` payload as a Jackson
+`JsonNode` (a JSON null node when `data` is absent).
+
+```java
+JsonNode branches = client.request("GET", "/patients/allBranches");
+JsonNode created = client.request("POST", "/patients/someNewEndpoint", "bearer",
+        Map.of("foo", "bar"));
+```
+
+| Parameter | Type     | Purpose |
+|-----------|----------|---------|
+| `method`  | `String` | `GET` / `POST` / `PUT` / `DELETE`. |
+| `path`    | `String` | Path relative to the base URL, with a leading slash. |
+| `auth`    | `String` | `"public"` / `"bearer"` / `"partner"` (case-insensitive; null or blank → `bearer`). |
+| `body`    | `Object` | Optional JSON payload (object/map); ignored on `GET`. |
+
+A two-argument overload — `client.request(method, path)` — uses `bearer` auth and
+sends no body.
+
+Prefer a typed resource method when one exists; reach for `request` only for the gaps.
+
 ## Types
 
 Request inputs are Java `record` types — `SearchInput`, `PaymentInput`, `CardInfo`,
