@@ -56,7 +56,7 @@ const sdks = [
     lang: "Java",
     registry: "Maven Central",
     pkg: "com.bulutklinik:sdk",
-    install: 'implementation("com.bulutklinik:sdk:0.1.0")',
+    install: 'implementation("com.bulutklinik:sdk:0.2.0")',
     repo: `${GITHUB_ORG}/java-sdk`,
     status: "live",
   },
@@ -89,6 +89,7 @@ await client.auth.connect({ apiUserName, apiUserPassword, loginMode: "email" });
 const { foundDoctors } = await client.doctors.search({
   searchParams: { withFreeText: "kardiyoloji" },
   orderParams: ["slot"],
+  currentPage: 1,
 });`,
   Python: `from bulutklinik import BulutklinikClient
 
@@ -104,6 +105,7 @@ $client->auth->connect('you@example.com', '•••••••', 'email');
 
 $result = $client->doctors->search(searchParams: ['withFreeText' => 'kardiyoloji']);`,
   Go: `client := bk.NewClient(bk.WithCredentials(id, secret))
+ctx := context.Background()
 client.Auth.Connect(ctx, bk.ConnectInput{
     APIUserName: "you@example.com", APIUserPassword: "•••••••", LoginMode: "email",
 })
@@ -182,13 +184,13 @@ const steps = [
       <div class="mx-auto max-w-6xl px-5 pt-20 pb-16 text-center sm:pt-28">
         <span class="inline-flex items-center gap-2 rounded-full border border-brand-100 bg-white px-3 py-1 text-xs font-medium text-brand-700 shadow-sm">
           <span class="h-1.5 w-1.5 rounded-full bg-brand-500"></span>
-          Official SDKs · v0.1.0
+          Official SDKs · v0.2.0
         </span>
         <h1 class="mx-auto mt-6 max-w-3xl text-4xl font-extrabold leading-[1.1] tracking-tight text-slate-900 sm:text-6xl">
           Build healthcare integrations <span class="text-brand-600">faster</span>
         </h1>
         <p class="mx-auto mt-5 max-w-2xl text-lg text-slate-600">
-          The Bulutklinik API powers appointments, payments and patient health data for cloud HBYS.
+          The Bulutklinik API powers appointments, payments and patient health data for cloud HIS.
           Ship in your language with official, idiomatic SDKs.
         </p>
         <div class="mt-8 flex flex-wrap items-center justify-center gap-3">
@@ -333,7 +335,7 @@ const steps = [
     <div class="mx-auto grid max-w-6xl grid-cols-2 gap-8 px-5 py-14 sm:grid-cols-4">
       <div class="col-span-2 sm:col-span-1">
         <img src="/bulutklinik-wordmark-white.svg" alt="Bulutklinik" class="h-7 w-auto" />
-        <p class="mt-4 max-w-xs text-sm text-slate-400">Telemedicine & cloud HBYS for clinics. Official developer SDKs.</p>
+        <p class="mt-4 max-w-xs text-sm text-slate-400">Telemedicine & cloud HIS for clinics. Official developer SDKs.</p>
       </div>
       <div>
         <h4 class="text-sm font-semibold text-white">SDKs</h4>
@@ -362,7 +364,7 @@ const steps = [
     </div>
     <div class="border-t border-white/10">
       <div class="mx-auto max-w-6xl px-5 py-6 text-sm text-slate-500">
-        © 2026 Bulutklinik · API v3 · SDKs v0.1.0
+        © 2026 Bulutklinik · API v3 · SDKs v0.2.0
       </div>
     </div>
   </footer>

@@ -15,7 +15,7 @@ over 27 endpoints.
 
 - **Module:** `github.com/bulutklinik/go-sdk` (package identifier `bulutklinik`)
 - **Source:** [github.com/bulutklinik/go-sdk](https://github.com/bulutklinik/go-sdk)
-- **Spec version:** 0.1.0 (API v3)
+- **Spec version:** 0.2.0 (API v3)
 
 ## Install
 
@@ -52,7 +52,7 @@ import (
 
 func main() {
 	client := bk.NewClient(
-		bk.WithEnvironment(bk.Production), // Production | Test | Local
+		bk.WithEnvironment(bk.Production), // Production | Test
 		bk.WithCredentials("your-oauth-client-id", "your-oauth-client-secret"),
 	)
 	ctx := context.Background()
@@ -126,8 +126,7 @@ production with an in-memory token store and a 30s timeout.
 | `WithHTTPClient(c)`               | `*http.Client`     | `&http.Client{Timeout: 30s}` | Injectable HTTP client. |
 | `WithTimeout(d)`                  | `time.Duration`    | `30 * time.Second` | Request timeout (ignored when `WithHTTPClient` is set). |
 
-`Environment` is a string type with three constants: `bk.Production`, `bk.Test`
-and `bk.Local`.
+`Environment` is a string type with two constants: `bk.Production` and `bk.Test`.
 
 ### Environments
 

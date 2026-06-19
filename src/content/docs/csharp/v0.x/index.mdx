@@ -16,7 +16,7 @@ over 27 endpoints.
 
 - **Package:** [`Bulutklinik.Sdk`](https://www.nuget.org/packages/Bulutklinik.Sdk) on NuGet
 - **Source:** [github.com/bulutklinik/csharp-sdk](https://github.com/bulutklinik/csharp-sdk)
-- **Spec version:** 0.1.0 (API v3)
+- **Spec version:** 0.2.0 (API v3)
 
 ## Install
 
@@ -37,7 +37,7 @@ using Bulutklinik.Sdk;
 
 var client = new BulutklinikClient(new BulutklinikClientOptions
 {
-    Environment = BulutklinikEnvironment.Production, // Production | Test | Local
+    Environment = BulutklinikEnvironment.Production, // Production | Test
     ClientId = "your-oauth-client-id",
     ClientSecret = "your-oauth-client-secret",
 });

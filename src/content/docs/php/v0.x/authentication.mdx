@@ -59,7 +59,7 @@ $client->auth->connectWithTwoFactor('123456', $login->twoFactorResponse);
 ```
 
 Parameters are `string $smsVerificationCode` and `string $response` (the blob from
-`connect`). Tokens are minted during `connect` and returned (and stored) here. The
+`connect`). Tokens are minted at this 2FA step (not during `connect`, which only returns the challenge) and stored here. The
 method returns `void`; the SDK sends only `smsVerificationCode` + `response`.
 
 ## `auth->register`

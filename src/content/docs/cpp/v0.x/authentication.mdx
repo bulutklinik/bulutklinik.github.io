@@ -115,7 +115,7 @@ Rules enforced by the API:
 
 - `phone_number` must start with `+` and a country code (e.g. `+90 555 111 22 33`); bare digits are rejected.
 - `api_user_name` should equal `phone_number` (the `+CC` form) — it becomes the `afterRegister` login username.
-- `accept_user_agreement` defaults to `1`.
+- `accept_user_agreement` defaults to `1` (a `0` is coerced to `1`).
 
 > The SMS-verification step that produces the `response` blob is **not** part of
 > the SDK surface; obtain `response` + `sms_verification_code` beforehand. On success

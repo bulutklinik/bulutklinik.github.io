@@ -16,7 +16,7 @@ over 27 endpoints.
 
 - **Package:** [`bulutklinik/sdk`](https://packagist.org/packages/bulutklinik/sdk) on Packagist
 - **Source:** [github.com/bulutklinik/php-sdk](https://github.com/bulutklinik/php-sdk)
-- **Spec version:** 0.1.0 (API v3)
+- **Spec version:** 0.2.0 (API v3)
 
 ## Install
 
@@ -46,7 +46,7 @@ use Bulutklinik\Sdk\ClientConfig;
 use Bulutklinik\Sdk\Environment;
 
 $client = new BulutklinikClient(new ClientConfig(
-    environment: Environment::Production, // Production | Test | Local
+    environment: Environment::Production, // Production | Test
     clientId: 'your-oauth-client-id',
     clientSecret: 'your-oauth-client-secret',
 ));

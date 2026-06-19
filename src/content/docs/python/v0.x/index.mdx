@@ -8,7 +8,7 @@ order: 0
 
 The official Bulutklinik API SDK for Python. It is hand-written, fully typed
 (`py.typed`), and ships **both a synchronous and an asynchronous client** built on
-[httpx](https://www.python-httpx.org/). Python 3.9+.
+[httpx](https://www.python-httpx.org/). Python 3.10+.
 
 It covers the patient flow end to end: **authentication, doctor search, availability
 slots, appointments, payments (3-D Secure) and health measures** — 6 service groups
@@ -16,7 +16,7 @@ over 27 endpoints.
 
 - **Package:** [`bulutklinik-sdk`](https://pypi.org/project/bulutklinik-sdk/) on PyPI
 - **Source:** [github.com/bulutklinik/python-sdk](https://github.com/bulutklinik/python-sdk)
-- **Spec version:** 0.1.0 (API v3)
+- **Spec version:** 0.2.0 (API v3)
 
 ## Install
 
@@ -40,7 +40,7 @@ connection pool for you.
 from bulutklinik import BulutklinikClient
 
 with BulutklinikClient(
-    environment="production",  # "production" | "test" | "local"
+    environment="production",  # "production" | "test"
     client_id="your-oauth-client-id",
     client_secret="your-oauth-client-secret",
 ) as client:
@@ -106,7 +106,7 @@ Both `BulutklinikClient(...)` and `AsyncBulutklinikClient(...)` take the same
 
 | Option          | Type                          | Default                  | Purpose |
 |-----------------|-------------------------------|--------------------------|---------|
-| `environment`   | `Environment \| str`          | `"production"`           | Named base-URL preset (`"production"` / `"test"` / `"local"`). Ignored when `base_url` is set. |
+| `environment`   | `Environment \| str`          | `"production"`           | Named base-URL preset (`"production"` / `"test"`). Ignored when `base_url` is set. |
 | `base_url`      | `str \| None`                 | `None`                   | Explicit base URL; overrides `environment`. |
 | `lang`          | `str`                         | `"tr"`                   | `lang` header sent with every request (`tr`, `en`, `de`, `az`). |
 | `client_id`     | `str \| None`                 | `None`                   | OAuth client id (used by `connect` and token refresh). |

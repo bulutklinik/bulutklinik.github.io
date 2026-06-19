@@ -16,7 +16,7 @@ over 27 endpoints.
 
 - **Package:** [`com.bulutklinik:sdk`](https://central.sonatype.com/artifact/com.bulutklinik/sdk) on Maven Central
 - **Source:** [github.com/bulutklinik/java-sdk](https://github.com/bulutklinik/java-sdk)
-- **Spec version:** 0.1.0 (API v3)
+- **Spec version:** 0.2.0 (API v3)
 
 ## Install
 
@@ -26,14 +26,14 @@ Maven:
 <dependency>
   <groupId>com.bulutklinik</groupId>
   <artifactId>sdk</artifactId>
-  <version>0.1.0</version>
+  <version>0.2.0</version>
 </dependency>
 ```
 
 Gradle (Kotlin DSL):
 
-```java
-implementation("com.bulutklinik:sdk:0.1.0")
+```kotlin
+implementation("com.bulutklinik:sdk:0.2.0")
 ```
 
 The SDK pulls in Jackson (`jackson-databind`) transitively; the HTTP client is the
@@ -51,7 +51,7 @@ import java.util.List;
 import java.util.Map;
 
 BulutklinikClient client = BulutklinikClient.builder()
-        .environment(Environment.PRODUCTION) // PRODUCTION | TEST | LOCAL
+        .environment(Environment.PRODUCTION) // PRODUCTION | TEST
         .credentials("your-oauth-client-id", "your-oauth-client-secret")
         .build();
 

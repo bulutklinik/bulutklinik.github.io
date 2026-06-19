@@ -62,7 +62,7 @@ export const LANGS: LangMeta[] = [
     short: "Java",
     registry: "Maven Central",
     pkg: "com.bulutklinik:sdk",
-    install: 'implementation("com.bulutklinik:sdk:0.1.0")',
+    install: 'implementation("com.bulutklinik:sdk:0.2.0")',
     repo: `${ORG}/java-sdk`,
   },
   {

@@ -16,7 +16,7 @@ over 27 endpoints.
 
 - **Package:** [`@bulutklinik/sdk`](https://www.npmjs.com/package/@bulutklinik/sdk) on npm
 - **Source:** [github.com/bulutklinik/js-sdk](https://github.com/bulutklinik/js-sdk)
-- **Spec version:** 0.1.0 (API v3)
+- **Spec version:** 0.2.0 (API v3)
 
 ## Install
 
@@ -41,7 +41,7 @@ Construct the client once and reuse it; each service group is exposed as a prope
 import { BulutklinikClient } from "@bulutklinik/sdk";
 
 const client = new BulutklinikClient({
-  environment: "production", // "production" | "test" | "local"
+  environment: "production", // "production" | "test"
   clientId: "your-oauth-client-id",
   clientSecret: "your-oauth-client-secret",
 });
@@ -86,7 +86,7 @@ Every data method returns the unwrapped `data` payload from the response envelop
 
 | Option         | Type                                   | Default        | Purpose |
 |----------------|----------------------------------------|----------------|---------|
-| `environment`  | `"production" \| "test" \| "local"`    | `"production"` | Named base-URL preset. Ignored when `baseUrl` is set. |
+| `environment`  | `"production" \| "test"`    | `"production"` | Named base-URL preset. Ignored when `baseUrl` is set. |
 | `baseUrl`      | `string`                               | —              | Explicit base URL; overrides `environment`. |
 | `lang`         | `"tr" \| "en" \| "de" \| "az"`         | `"tr"`         | `lang` header sent with every request. |
 | `clientId`     | `string`                               | —              | OAuth client id (used by `connect` and token refresh). |

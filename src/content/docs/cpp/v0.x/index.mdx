@@ -16,7 +16,7 @@ over 27 endpoints.
 
 - **Package:** `bulutklinik` (vcpkg · Conan · CMake `find_package`)
 - **Source:** [github.com/bulutklinik/cpp-sdk](https://github.com/bulutklinik/cpp-sdk)
-- **Spec version:** 0.1.0 (API v3)
+- **Spec version:** 0.2.0 (API v3)
 
 Everything lives under the `bulutklinik` namespace and the single public header
 `` `#include <bulutklinik/bulutklinik.hpp>` ``.
@@ -62,7 +62,7 @@ accessor method. Data methods return an `` `nlohmann::json` `` (the unwrapped
 
 int main() {
     bulutklinik::ClientOptions options;
-    options.environment = bulutklinik::Environment::Production; // Production | Test | Local
+    options.environment = bulutklinik::Environment::Production; // Production | Test
     options.client_id = "your-oauth-client-id";
     options.client_secret = "your-oauth-client-secret";
     bulutklinik::Client client(options);
